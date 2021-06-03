@@ -5,6 +5,8 @@ import struct
 import telnetlib
 import time
 
+import config
+
 telnetLogger = logging.getLogger(__name__)
 
 ASCII_ESC = b'\x1B'
@@ -395,7 +397,7 @@ class Screen():
 class ProfX(): #Because it's a more powerful TelePath(y) user
     """ Contains methods and strutures to connect to, and exchange data with, the TelePath LIMS system """
     tn=telnetlib.Telnet()
-    IP                  = "192.168.32.28"   # love 2 LAN
+    IP                  = config.LIMS_IP   # love 2 LAN
     PORT                = 23                # technically pointless, but let's be precise
     DEBUGLEVEL          = 0                 # value >0 will show (parts of) telnet traffic on-screen, this may include your password 
     #MAX_WINDOW_WIDTH    = 5000              # Max Value: 65535
