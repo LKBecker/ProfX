@@ -7,18 +7,20 @@
 
 <!-- GETTING STARTED -->
 ## Getting Started
-To get a local copy up and running follow these simple steps.
+To get a local copy up and running follow these simple steps:
+* install python v3.7 or later
+* clone repository
+* create a `config.py` with your local TelePath instance's commands, IP address, *et cetera*. See `example_config.py` for the required layout and data.
 
 ### Prerequisites
-* python 3.7 or later
+* Python v3.7 or later
 * matplotlib, for advanced features
-* a computer able to connecte to your target LIMS
+* a computer able to connecte to your target LIMS (many are intranet-only)
   
 <!-- USAGE EXAMPLES -->
 ## Usage
-Update `localisation.py` with your local TelePath instance's commands
-Use main.py to access commands. A CLI is planned for future release.
-
+Use main.py to run commands. 
+A CLI is planned for future release.
 
 <!-- ROADMAP -->
 ## Roadmap
@@ -26,5 +28,4 @@ Use main.py to access commands. A CLI is planned for future release.
 
 <!-- LICENSE -->
 ## License
-
 Distributed under the MIT License. See `LICENSE` for more information.
