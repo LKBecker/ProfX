@@ -1,0 +1,9 @@
+/.vs
+/.vscode
+*.db
+*.txt
+*.log
+/Sendaways_Database.tsv
+*.pyc
+*.xlsx
+config.py

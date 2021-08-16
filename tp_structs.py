@@ -2,22 +2,23 @@
 
 from tp_telnet import ProfX, Screen
 from tp_utils import process_whitespaced_table, extract_column_widths, calc_grid
+import config
 
+from collections import Counter
 import datetime
 from itertools import chain
 import logging
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 plt.style.use('ggplot')
+font = {'family' : 'monospace',
+        'size'   : 8}
+plt.rc('font', **font)  # pass in the font dict as kwargs
+
 import os.path
 import time
 
 dataLogger = logging.getLogger(__name__)
-
-def value_or_none(item):
-    if item:
-        return item
-    return None
 
 class ReferenceRange():
     def __init__(self, Analyte:str, Upper:float, Lower:float, Unit:str):
@@ -36,30 +37,26 @@ class ReferenceRange():
     def __str__(self):
         return f"Reference range for {self.Analyte}: {self.LowerLimit} - {self.UpperLimit} {self.Unit}"
 
-def loadReferenceRanges(filePath="S:/CS-PATHOLOGY/BIOCHEMISTRY/Z Personal/LKBecker/STP/Limits.txt"):
-    RefRanges = []
-    if not os.path.isfile(filePath):
-        raise IOError
-    with open(filePath, 'r') as RefRangeFile:
-        for line in RefRangeFile:
-            tmp = line.split("\t")
-            tmp = [x.strip() for x in tmp]
-            if tmp[0]=="Analyte": continue
-            RefRanges.append( ReferenceRange(Analyte=tmp[0], Upper=tmp[3], Lower=tmp[2], Unit=tmp[1]) )
-    return RefRanges
-
-REF_RANGES = loadReferenceRanges()
 
 class PatientContainer():
     def __init__(self):
         self.Patients = {}
 
+    def __getitem__(self, key):
+        return self.Patients[key]
+
+    def __setitem__(self, key, item):
+        self.Patients[key] = item
+
     def has_patient(self, PatientID):
+        if type(PatientID) is "Patient":
+            PatientID = str(Patient)
         if PatientID in self.Patients.keys() : return True
         return False
 
+    def append(self, Patient):
+        self.Patients[str(Patient.ID)]=Patient
 
-PATIENTSTORE = PatientContainer()
 
 """Contains a Specimen Notepad entry, including author, etc"""
 class SpecimenNotepadEntry():
@@ -76,27 +73,35 @@ class SpecimenNotepadEntry():
 
 
 """ Contains data regarding test result(s) - analyte, flags"""
-class Result():
-    def __init__(self, Analyte, Value=None, Units="", ReportedOn=None, Flags=None):
+class SetResult():
+    def __init__(self, Analyte:str, Value=None, Units:str="", SampleTaken:datetime.datetime=None, AuthDateTime:str=None, ReportedOn:str=None, Flags:str=None):
+
+        def datetime_or_none(Value, Scheme):
+            if Value:
+                try:
+                    tmpDT = datetime.datetime.strptime(Value, Scheme)
+                except:
+                    tmpDT = Value
+                return tmpDT 
+            return None
+
         self.Analyte = Analyte
-        self.Value = Value #TODO: NA, less than, greater than.
+        try:
+            self.Value = float(Value)
+        except:
+            self.Value = Value #Preserves freetext, and < or > values
+            
         self.Units = Units
         self.Flags = Flags
-        #self.AuthorisedOn = None
-        #self.AuthorisedBy = None
-        if ReportedOn:
-            try:
-                self.ReportedOn = datetime.datetime.strptime(ReportedOn, "%d.%m.%y %H:%M")
-            except:
-                self.ReportedOn = ReportedOn
-        else: 
-            self.ReportedOn = None
-
+        self.AuthDateTime = datetime_or_none(AuthDateTime, "%d.%m.%y %H:%M")
+        self.ReportedOn = datetime_or_none(ReportedOn, "%d.%m.%y")
+        self.SampleTaken = datetime_or_none(SampleTaken, "%d.%m.%y %H:%M")
+        
     def __str__(self):
         ResStr = f"{self.Analyte}: {self.Value} {self.Units}"
-        if self.ReportedOn:
-            if isinstance(self.ReportedOn, datetime.datetime):
-                ResStr = ResStr + f"({self.ReportedOn.strftime('%y-%m-%d %H:%M')})"
+        if self.SampleTaken:
+            if isinstance(self.SampleTaken, datetime.datetime):
+                ResStr = ResStr + f"(Sample taken: {self.SampleTaken.strftime('%y-%m-%d %H:%M')})"
         if self.Flags:
             ResStr = ResStr + f" [{self.Flags}]"
         return ResStr
@@ -105,7 +110,7 @@ class Result():
         RepOnStr = self.ReportedOn
         if isinstance(self.ReportedOn, datetime.datetime):
             RepOnStr = self.ReportedOn.strftime("%d.%m.%Y %H:%M")
-        return f"Result(Analyte={self.Analyte}, Value={self.Value}, Units={self.Units}, Flags={self.Flags}, ReportedOn={RepOnStr})"
+        return f"SetResult(Analyte={self.Analyte}, Value={self.Value}, Units={self.Units}, Flags={self.Flags}, ReportedOn={RepOnStr})"
 
 
 """Contains a (set of) test(s), any result(s), and any comment(s) for that test"""
@@ -116,7 +121,10 @@ class TestSet():
         self.Index      = SetIndex
         self.Code       = SetCode
         self.Status     = Status
-        self.Results    = Results
+        if not Results:
+            self.Results    = []
+        else:
+            self.Results = Results
         if AuthedOn:
             try:
                 self.AuthedOn    = datetime.datetime.strptime(AuthedOn, "%d.%m.%y %H:%M")
@@ -154,15 +162,15 @@ class TestSet():
     @property
     def is_overdue(self): return self.Overdue.total_seconds() > 0
 
-    def addResult(self, resItem:Result):
-        #Add result to list after checking it's not already present, or a similar result for this analyte?
+    def addSetResult(self, resItem:SetResult):
+        #Add SetResult to list after checking it's not already present, or a similar result for this analyte?
         raise NotImplementedError
     
     def __repr__(self): 
         return f"TestSet(ID={str(self.Sample)}, SetIndex={self.Index}, SetCode={self.Code}, AuthedOn={self.AuthedOn}, AuthedBy={self.AuthedBy}, Status={self.Status}, ...)"
     
     def __str__(self): 
-        return f"[{self.Sample}, #{self.Index}: {self.Code} ({self.Status})] - {len(self.Results)} Results, {len(self.Comments)} Comments. Authorized {self.AuthedOn} by {self.AuthedBy}."
+        return f"[{self.Sample}, #{self.Index}: {self.Code} ({self.Status})] - {len(self.Results)} SetResults, {len(self.Comments)} Comments. Authorized {self.AuthedOn} by {self.AuthedBy}."
     
     def prepare_file_format(self):
         pass
@@ -175,13 +183,6 @@ class TestSet():
 class SampleID():
     CHECK_INT = 23
     CHECK_LETTERS = ['B', 'W', 'D', 'F', 'G', 'K', 'Q', 'V', 'Y', 'X', 'A', 'S', 'T', 'N', 'J', 'H', 'R', 'P', 'L', 'C', 'Z', 'M', 'E']
-
-    def iterate_check_digit(self):
-        for digit in SampleID.CHECK_LETTERS:
-            self.CheckChar = digit
-            if self.validate(): 
-                dataLogger.debug(f"iterate_check_digit(): Check digit {digit} is valid for '{self.Year}.{self.LabNumber}.?'.")
-                break
 
     def __init__(self, IDStr, Override = False):
         #Prefix, Date Part, Number Part, Check Char
@@ -196,6 +197,7 @@ class SampleID():
             self.AsText = IDStr
             return
 
+        IDStr = IDStr.upper()
         if IDStr[1]==",":
             self.Prefix = IDStr[:2]
             IDStr=IDStr[2:]
@@ -226,11 +228,17 @@ class SampleID():
                 elif len(IDStrSplit[1]) == 7:
                     dataLogger.debug("SampleID(): Last entry is len 7, likely Sample ID")
                     self.LabNumber = int(IDStrSplit[1])
+                elif len(IDStrSplit[1]) == 8:
+                    dataLogger.debug("SampleID(): Last entry is len 8, likely Sample ID and check digit")
+                    chkOrd = ord(IDStrSplit[1][-1])
+                    if chkOrd >= 65 and chkOrd <= 90: #it's an ASCII capital letter between A and Z
+                        self.CheckChar = IDStrSplit[1][-1]
+                        self.LabNumber = int(IDStrSplit[1][:-1])
                 else:
                     raise ValueError(f"Cannot parse '{IDStrSplit[1]}' as Sample ID or Check Digit")
 
             elif len(IDStrSplit)==3:
-                dataLogger.debug("SampleID(): Three pieces of data found. Running all tests.")
+                #dataLogger.debug("SampleID(): Three pieces of data found. Running all tests.")
                 assert len(IDStrSplit[0]) == 2
                 self.Year = int(IDStrSplit[0])
 
@@ -254,35 +262,14 @@ class SampleID():
             self.AsText = str(self)
 
         except (AssertionError, ValueError):
-            dataLogger.debug("SampleID(): ID parsing failed for {IDStr}.")
-    
-    """Function to check sample IDs, replicating TelePath's check digit algorithm  """
-    def validate(self) -> bool:
-        assert self.Year
-        assert self.LabNumber
-        assert self.CheckChar
-
-        if self.Override:
-            return False
-
-        sID = str(self).replace(".", "")
-        if (len(sID)!=10):
-            dataLogger.error("SampleID '%s' should be 10 charactes long, is %d." %(sID, len(sID)))
-            return False
-        sID = sID[:-1] #Remove check char
-        sID = [char for char in sID]          # split into characters - year, then ID
-        checkTuples = zip(range(22,13,-1), map(lambda x: int(x), sID))      # Each number of the sample ID gets multiplied by 22..14, go to 13 to get full length
-        checkTuples = list(map(lambda x: x[0]*x[1], checkTuples))           # Multiply.
-        checkSum    = sum(checkTuples)                                      # Calculate Sum...
-        checkDig    = SampleID.CHECK_INT - (checkSum % SampleID.CHECK_INT)  # Check digit is 23 - (sum %% 23)
-        checkDig    = SampleID.CHECK_LETTERS[checkDig-1]                      # Not from the full alphabet, and not in alphabet order, however. -1 to translate into python list index
-        result      = self.CheckChar==checkDig
-        return result
+            dataLogger.debug(f"SampleID(): ID parsing failed for {IDStr}.")
 
     def __str__(self) -> str:
         if self.Override:
             return self.AsText
-        return f"{self.Year}.{self.LabNumber:07}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
+        if self.LabNumber:
+            return f"{self.Year}.{self.LabNumber:07}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
+        return f"{self.Year}.{self.LabNumber}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
 
     def __repr__(self) -> str:
         if self.Override:
@@ -324,22 +311,93 @@ class SampleID():
 
         return True
 
+    """Function to check sample IDs, replicating TelePath's check digit algorithm  """
+    def validate(self) -> bool:
+        assert self.Year
+        assert self.LabNumber
+        assert self.CheckChar
+
+        if self.Override:
+            return False
+
+        sID = str(self).replace(".", "")
+        if (len(sID)!=10):
+            dataLogger.error("SampleID '%s' should be 10 charactes long, is %d." %(sID, len(sID)))
+            return False
+        sID = sID[:-1] #Remove check char
+        sID = [char for char in sID]          # split into characters - year, then ID
+        checkTuples = zip(range(22,13,-1), map(lambda x: int(x), sID))      # Each number of the sample ID gets multiplied by 22..14, go to 13 to get full length
+        checkTuples = list(map(lambda x: x[0]*x[1], checkTuples))           # Multiply.
+        checkSum    = sum(checkTuples)                                      # Calculate Sum...
+        checkDig    = SampleID.CHECK_INT - (checkSum % SampleID.CHECK_INT)  # Check digit is 23 - (sum %% 23)
+        checkDig    = SampleID.CHECK_LETTERS[checkDig-1]                      # Not from the full alphabet, and not in alphabet order, however. -1 to translate into python list index
+        result      = self.CheckChar==checkDig
+        return result
+
+    def iterate_check_digit(self):
+        for digit in SampleID.CHECK_LETTERS:
+            self.CheckChar = digit
+            if self.validate(): 
+                dataLogger.debug(f"iterate_check_digit(): Check digit {digit} is valid for '{self.Year}.{self.LabNumber}.?'.")
+                break
+
 
 """Contains data describing a patient sample, including demographics of the patient, and Specimen Notepad"""
 class Specimen():
-
     def __init__(self, SpecimenID:str, OverrideID:bool=False):
-        self._ID                 = SampleID(SpecimenID, OverrideID)
+        self._ID                = SampleID(SpecimenID, OverrideID)
+        self.PatientID          = None
         self.LName              = None
         self.FName              = None 
         self.DOB                = None
-        self.ClinDetails        = None
-        self.Ordered            = None 
+        self.ClinDetails        = None  #TODO: Get, via F 4 ProfX.read_data() Q
+        self.Collected            = None 
         self.Received           = None
         self.Sets               = []
         self.NotepadEntries     = []
         self.hasNotepadEntries  = False
+        self.Location           = "None"
+        self.Requestor          = "None"
+        self.ReportComment      = None
+        self.Comment            = None
+        self.Category           = None
+        self.Type               = None
+        self.NHSNumber          = None
     
+    def __repr__(self):
+        return f"<Specimen {self.ID}, {len(self.Sets)} Set(s), {len(self.NotepadEntries)} Notepad entries>"
+
+    def __lt__(self, other):
+        assert isinstance(other, Specimen)
+        if self.Collected and other.Collected:
+            if isinstance(self.Collected, datetime.datetime) and isinstance(other.Collected, datetime.datetime):
+                #dataLogger.debug(f"Specimen.__lt__(): Checking datetime between self ({self.Collected.strftime('%y-%m-%d %H:%M')}) and other ({other.Collected.strftime('%y-%m-%d %H:%M')})")
+                return self.Collected < other.Collected
+            if isinstance(self.Collected, str) and isinstance(other.Collected, str):
+                #dataLogger.debug(f"Specimen.__lt__(): Checking string between self ({self.Collected}) and other ({other.Collected})")
+                return self.Collected < other.Collected
+        #dataLogger.debug(f"Specimen.__lt__(): Checking IDs between self ({self.ID}) and other ({other.ID})")
+        return (self.ID < other.ID)
+    
+    @property
+    def SetCodes(self): return [x.Code for x in self.Sets]
+
+    @property
+    def ID(self): return str(self._ID)
+
+    @property
+    def Results(self):
+        try:
+            SetResults = [x.Results for x in self.Sets]
+            if SetResults:
+                SetResults = list(chain.from_iterable(SetResults))
+                return SetResults
+            else:
+                return []
+        except:
+            dataLogger.warning(f"Property 'Results' raised an exception for an instance of Patient {self.ID}. Please investigate. Returning None.")
+            return [] #TODO Probably shouldn't fail silently?
+
     @staticmethod
     def parse_datetime_with_NotKnown(string) -> datetime.datetime:
         if (string == None):
@@ -361,15 +419,32 @@ class Specimen():
             except:
                 return None
     
+    def get_chunks(self):
+        dataLogger.debug("Specimen.get_chunks(): Returning to main menu.")
+        ProfX.return_to_main_menu()
+        #ProfX.send(LOCALISATION.SpecimenEnquiry)
+        ProfX.send("SENQ")
+        ProfX.read_data()
+        ProfX.send(self.ID)
+        ProfX.read_data()
+        self.from_chunks(ProfX.screen.ParsedANSI)
+
     def from_chunks(self, ANSIChunks:list):
-        LastRetrieveIndex = max( [x for x in range(0, len(ANSIChunks)) if ANSIChunks[x].text == "Retrieving data..."] )
+        if len(ANSIChunks)==0:
+            raise Exception("Specimen.from_chunks(): No chunks to process in list ANSIChunks.")
+        RetrieveChunks = [x for x in range(0, len(ANSIChunks)) if ANSIChunks[x].text == "Retrieving data..."]
+        if RetrieveChunks:
+            LastRetrieveIndex = max( RetrieveChunks )
+        else:
+            LastRetrieveIndex = 0
         DataChunks = sorted([x for x in ANSIChunks[LastRetrieveIndex+1:] if x.highlighted and x.deleteMode == 0 and x.line != 6])
         #get the LAST item that mentions the sample ID, which should be the Screen refresh after "Retrieving data..."
                 
         self._ID                = SampleID(Screen.chunk_or_none(DataChunks, line = 3, column = 17))
-
+        self.PatientID          = Screen.chunk_or_none(DataChunks, line = 8, column = 1)
         #TODO: put into PATIENT object (Search for existing patient, if not make new for Registration)
         #TODO: get patient ID (registration)
+
         self.LName              = Screen.chunk_or_none(DataChunks, line = 8, column = 21)
         self.FName              = Screen.chunk_or_none(DataChunks, line = 8, column = 35)
         self.DOB                = Screen.chunk_or_none(DataChunks, line = 8, column = 63)
@@ -385,9 +460,25 @@ class Specimen():
                     self.DOB = datetime.date.strptime(self.DOB, "%d.%m.%y")
                 except:
                     pass
-        self.Ordered            = Specimen.parse_datetime_with_NotKnown(Screen.chunk_or_none(DataChunks, line = 3, column = 67)) 
+        
+        if self.PatientID:
+            if not PATIENTSTORE.has_patient(self.PatientID):
+                _Patient = Patient(self.PatientID)
+                _Patient.LName = self.LName
+                _Patient.FName = self.FName
+                _Patient.DOB = self.DOB
+                PATIENTSTORE.append(_Patient)
+            else:
+                _Patient = PATIENTSTORE[self.PatientID]
+            _Patient.add_sample(self)
+        
+        self.Collected            = Specimen.parse_datetime_with_NotKnown(Screen.chunk_or_none(DataChunks, line = 3, column = 67)) 
         self.Received           = Specimen.parse_datetime_with_NotKnown(Screen.chunk_or_none(DataChunks, line = 4, column = 67))
         self.Type               = Screen.chunk_or_none(DataChunks, line = 5, column = 15)
+        self.Location           = Screen.chunk_or_none(DataChunks, line = 9, column = 18)
+        self.Requestor          = Screen.chunk_or_none(DataChunks, line = 9, column = 55)
+        self.Comment            = Screen.chunk_or_none(DataChunks, line = 6, column = 16)
+        self.ReportComment      = Screen.chunk_or_none(DataChunks, line = 4, column = 16)
         
         TestStart = ANSIChunks.index([x for x in ANSIChunks if x.text == "Sets Requested :-"][0])
         for i in range(TestStart+3, len(ANSIChunks), 4):
@@ -406,192 +497,204 @@ class Specimen():
         #TelePath only highlights the specimen notepad option if entries exist; else it's part of a single chunk of options, none highlighted. So...
         if [x for x in ANSIChunks if (x.text=="spc N'pad" and x.highlighted)]: 
             self.hasNotepadEntries = True
-    
-    @property
-    def SetCodes(self): return [x.Code for x in self.Sets]
-
-    @property
-    def ID(self): return str(self._ID)
-
-    @property
-    def Results(self): 
-        return list(chain.from_iterable([x.Results for x in self.Sets]))
         
     #TODO - are these still needed?
     def get_set_index(self, code):
         if code not in self.SetCodes: return -1
         if len(self.Sets) == 0: raise IndexError("No tests are registered with this Specimen")
         #results = list(map(lambda y: y[0], filter(lambda x: x[1]==code, self.Tests)))
-        results = [x.Index for x in self.Sets if x.Code==code]
-        if len(results)==1 : return results[0]
-        return results
+        Indices = [x.Index for x in self.Sets if x.Code==code]
+        if len(Indices)==1 : return Indices[0]
+        return Indices
     
     def get_set_status(self, code):
         if code not in self.SetCodes: return -1
         if len(self.Sets) == 0: raise IndexError("No tests are registered with this Specimen")
         #results = list(map(lambda y: y[2], filter(lambda x: x[1]==code, self.Tests)))
-        results = [x.Status for x in self.Sets if x.Code==code]
-        if len(results)==1 : return results[0]
-        return results
-    
-    def __repr__(self):
-        totalResults = sum([len(x.Results) for x in self.Sets])
-        return f"<Specimen {self.ID}, {len(self.Sets)} Sets with {totalResults} total results, {len(self.NotepadEntries)} Notepad entries>"
-
-    def __lt__(self, other):
-        assert isinstance(other, Specimen)
-        if self.Ordered and other.Ordered:
-            if isinstance(self.Ordered, datetime.datetime) and isinstance(other.Ordered, datetime.datetime):
-                #dataLogger.debug(f"Specimen.__lt__(): Checking datetime between self ({self.Ordered.strftime('%y-%m-%d %H:%M')}) and other ({other.Ordered.strftime('%y-%m-%d %H:%M')})")
-                return self.Ordered < other.Ordered
-            if isinstance(self.Ordered, str) and isinstance(other.Ordered, str):
-                #dataLogger.debug(f"Specimen.__lt__(): Checking string between self ({self.Ordered}) and other ({other.Ordered})")
-                return self.Ordered < other.Ordered
-        #dataLogger.debug(f"Specimen.__lt__(): Checking IDs between self ({self.ID}) and other ({other.ID})")
-        return (self.ID < other.ID)
+        Statuses = [x.Status for x in self.Sets if x.Code==code]
+        if len(Statuses)==1 : return Statuses[0]
+        return Statuses
     
     def validate_ID(self) -> bool: return self._ID.validate()
     
-    """
-    Writes the sample, and all data contained therein, to file.
-    filename - the file to write to. Default: <SampleID>.txt
-    path     - the path to write to. Default: /SampleExport/
-    overwrite- whether to overwrite any existing file(s), or append. Default True (overwrite).
-    anonymityLevel - removes PII from output depending on level. #TODO!!
-        Level 0 - full output, no removal
-        Level 1 - Name removed, DOB and sex remain
-        Level 2 - Name and Sex removed, DOB remains
-        Level 3 - Name and DOB removed, sex remains
-        Level 4 - DOB, Name, Sex removed, only sample ID remains
-    """
-    def write_to_file(self, filename=None, path="/SampleExport/", overwrite=True, anonymityLevel=3):
-        if not filename:
-            filename = f"{self.ID}.txt"
-        if not os.path.exists(path):
-            os.makedirs(path)
-        finalPath = os.path.join(path, filename)
-        dataLogger.info(f"Exporting sample {self.ID} to {finalPath}")
-        outFileMode = "a"
-        if overwrite:
-            outFileMode = "w"
-        with open(finalPath, mode=outFileMode) as outFile:
-            ts = datetime.datetime.now().strftime("%y-%m-%d %H:%M")
-            outFile.write(f"ProfX TelePath client. Sample data exported {ts}.")
-            #TODO
-            pass
-
     def get_recent_results(self, nMaxSample:int=20):
-        ProfX.return_to_main_menu()
-        ProfX.send("SENQ")
-        ProfX.read_data()
-        ProfX.send(self.ID)
-        ProfX.read_data()
-        if (ProfX.screen.hasErrors == False):
-            _data = []
-            assert ("xpress Enq" in ProfX.screen.Options)
-            ProfX.send("E") #Activate Express Enquiry
-            ProfX.read_data()
-            sampleCounter = 0
-            while (sampleCounter < nMaxSample) and (ProfX.screen.hasErrors == False): 
-                sampleCounter = sampleCounter + 1
-                #Keep scanning until either the max samples are reached or you get an error, indicating you have run out of samples
-                #retrieve data, filter out delimiter lines
-                _SampleData = [x for x in ProfX.screen.Lines[7:-3] if x and x != "----------------------------------------------------------------------------"]
-                _SampleANSI = [x for x in ProfX.screen.ParsedANSI if x.line >=3 and x.line <= 5 and x.highlighted]
-                #TODO:
-                #Specimen = Screen.chunk_or_none(chunks = _SampleANSI, line = , column =)
-                #CollDate = Screen.chunk_or_none(chunks = _SampleANSI, line = , column =)
-            
-                #Construct Specimen() instance, and populate with TestSet()? -> hard to infer code...
-                #Add to Patient
-             
-                #assert (ProfX.screen.Type == "SENQ/PENQ-ExpressEnquiry")
-            #then, try sending Earlier, check for error 
-            #"No earlier requests in booking area ALL" - most common error
-        
-        else: #Error when sending SampleID
-            _errors = " ".join(ProfX.screen.Errors)
-            dataLogger.error(f"get_recent_samples(): {_errors}")
-            ProfX.send("")
-            ProfX.read_data()
+        raise NotImplementedError("FUNCTION ISN'T DONE YET SORRY")
+        #...Just do it via the PATIENT object?
 
 
 """Contains data pertaining to a patient. PII-heavy, DO NOT EXPORT"""
 class Patient():
-    def __init__(self):
+    def __init__(self, ID):
         #TODO: Add to PatientContainer, check for duplicate/pre-existing. Merge PID?
-        self.ID = None
+        self.ID = ID
         self.Samples = []
         self.FName = None
         self.LName = None
         self.DOB = None
         self.Sex = None
         self.Gender = None
-        self.Notepad = []
-        PATIENTSTORE[self.ID] = self
-
-    def get_history(self, nMaxSample:int=20):
-        #PENQ
-        raise NotImplementedError
-        
-    @staticmethod
-    def search_for(lname:str, fname:str, dob:str, idNo:str):
-        raise NotImplementedError
-    
-    def createPlot(self, Analyte:str=None, firstDate:datetime.datetime=None, lastDate:datetime.datetime=None):
-        #TODO: Get analyte through REPL esque menu?
-        Data = [Result for Sample in self.Samples for Set in Sample.Sets for Result in Set.Results]
-        if Analyte:
-            Analytes = [Analyte]
+        self.NHSNumber = None
+        if not PATIENTSTORE.has_patient(self.ID):
+            PATIENTSTORE[self.ID] = self
         else:
-            Analytes = list(set([Result.Analyte for Sample in self.Samples for Set in Sample.Sets for Result in Set.Results]))
+            other = PATIENTSTORE[self.ID]
+            self.cross_complete(other) 
+            PATIENTSTORE[self.ID] = self #Should overwrite (well, re-link) duplicate object with existing one?
+            del(other)
+
+    def __eq__(self, other):
+        if self.ID != other.ID: return False
+        if self.DOB != other.DOB: return False
+        if self.FName != other.FName: return False
+        if self.LName != other.LName: return False
+        if self.Sex != other.Sex: return False # this feels gross to write tbh
+        return True
+
+    def cross_complete(self, other):
+        #We don't have a "last edited on" marker on these entries, so...
+        try:
+            assert self.ID == other.ID
+            if self.DOB and other.DOB:
+                if type(self.DOB) == "datetime" and type(other.DOB) == "datetime": 
+                    assert self.DOB == other.DOB
+        
+        except AssertionError:
+            dataLogger.error(f"cross_complete(): Patient Objects {self} and {other} have ID or DOB mismatch. Aborting.")
+            return
+
+        if not self.FName and other.FName:
+            self.FName = other.FName
+        if not self.LName and other.LName:            
+            self.LName = other.LName        
+        if not self.NHSNumber and other.NHSNumber: 
+            self.NHSNumber = other.NHSNumber
+
+        for otherSample in other.Samples:
+            if otherSample in self.Samples: continue
+            self.Samples.append(otherSample)
+                            
+    def create_plot(self, FilterAnalytes:list=None, firstDate:datetime.datetime=None, lastDate:datetime.datetime=None, nMinPoints:int=1):
+        #TODO: Allow date limination? firstDate, lastDate, simple filter call when selecting Data
+        Data = list(chain.from_iterable([x.Results for x in self.Samples]))
+        Data = [x for x in Data if x.Value] #Remove results without value.
+        
+        if FilterAnalytes:
+            Analytes = Counter(FilterAnalytes)
+        else:
+            Analytes = Counter([x.Analyte for x in Data]) #TODO: Don't bother plotting anything with less than nMinPoints?
+
+
         fig = plt.figure()
-        plt.subplots_adjust(top=0.96, wspace=0.25, left=0.1)
+        plt.subplots_adjust(top=0.5, wspace=0.25, left=0.25)
 
         FigCounter = 0
-        nAnalytes = len(Analytes)
+        nAnalytes = len(Analytes.keys())
         gridSize = calc_grid(nAnalytes)
 
-        for _Analyte in Analytes:
-            _Data = [Result for Result in Data if Result.Analyte == _Analyte]
-                        
+        #TODO: One loop to calculate number of plots, then use pages (which seem to be thing?) or separate figures altogether
+
+        for _Analyte in Analytes.keys():
+            _SubplotData = [Result for Result in Data if Result.Analyte == _Analyte and isinstance(Result.Value, float)] #HACK to get plotting working, ignores all non-float/integer values. sorry.
+            if not _SubplotData:
+                continue                        
             FigCounter = FigCounter + 1
             ax = fig.add_subplot(*gridSize, FigCounter)
 
-            ax.plot([x.ReportedOn for x in _Data], [x.Value for x in _Data], c="#7d7d7d", zorder=1)
+            ax.plot([x.SampleTaken for x in _SubplotData], [y.Value for y in _SubplotData], c="#7d7d7d", zorder=1)
 
-            RefInterval = [x for x in REF_RANGES if x.Analyte == _Analyte]
+            RefInterval = [z for z in REF_RANGES if z.Analyte == _Analyte]
             if RefInterval:
+                #TODO: Extract values within RR, set values below RR to -INF, display is <LOQ? Force compatibility with most non-numeric values...
                 RefInterval = RefInterval[0]
                 ax.axhspan(ymin=RefInterval.LowerLimit, ymax=RefInterval.UpperLimit, facecolor='#2ca02c', alpha=0.3)
-                xInRef  = [x for x in _Data if x.Value >= RefInterval.LowerLimit and x.Value <= RefInterval.UpperLimit]
-                ax.scatter(x=[x.ReportedOn for x in xInRef], y=[x.Value for x in xInRef], label=_Analyte, s=10, c="#1f9c47", zorder=10) #Green, inside RR
-                xOutRef = [x for x in _Data if x.Value < RefInterval.LowerLimit or x.Value > RefInterval.UpperLimit]
-                ax.scatter(x=[x.ReportedOn for x in xOutRef], y=[x.Value for x in xOutRef], label=_Analyte, s=15, c="#ba1a14", zorder=10) #Red, for out of RR
+                CmpLower = RefInterval.LowerLimit if RefInterval.LowerLimit is not None else float('-inf')
+                CmpUpper = RefInterval.UpperLimit if RefInterval.UpperLimit is not None else float('inf')
+                xInRef  = [x for x in _SubplotData if x.Value >= CmpLower and x.Value <= CmpUpper]
+                ax.scatter(x=[x.SampleTaken for x in xInRef], y=[x.Value for x in xInRef], label=_Analyte, s=10, c="#1f9c47", zorder=10) #Green, inside RR
+                xOutRef = [x for x in _SubplotData if x.Value < CmpLower or x.Value > CmpUpper]
+                ax.scatter(x=[x.SampleTaken for x in xOutRef], y=[x.Value for x in xOutRef], label=_Analyte, s=15, c="#ba1a14", zorder=10) #Red, for out of RR
             else:
-                ax.scatter(x=[x.ReportedOn for x in _Data], y=[x.Value for x in _Data], label=_Analyte, s=10, c="#000000", zorder=10) #Black, no RR
+                ax.scatter(x=[x.SampleTaken for x in _SubplotData], y=[x.Value for x in _SubplotData], label=_Analyte, s=10, c="#000000", zorder=10) #Black, no RR
             
             ax.set_title(_Analyte)
             ax.xaxis.set_major_formatter(mpl.dates.DateFormatter("%b-%d"))
             ax.xaxis.set_minor_formatter(mpl.dates.DateFormatter("%b-%d"))
-            ax.set_ylabel(f"{_Data[0].Analyte} ({_Data[0].Units})")
+            ax.set_ylabel(f"{_SubplotData[0].Analyte} ({_SubplotData[0].Units})") #TODO ensure all analytes have same Units
             #ax.set_xticklabels(ax.get_xticklabels(), rotation = 90)
         
         plt.show()
 
-    def get_all_results(self):
+    def list_loaded_results(self):
         return list(chain.from_iterable([x.Results for x in self.Samples]))
+
+    def get_n_recent_samples(self, nMaxSamples:int=10):
+        def extract_specimens(samples):
+            for sample in samples: #Max seven per page
+                _tmpSpecimen = Specimen(sample[2]) #Should auto-append to self.Samples?
+                self.add_sample(_tmpSpecimen)
+                nSpecimens = len(self.Samples)
+                #logging.debug(f"get_n_recent_samples(): Patient {self.ID} now contains {nSpecimens} specimens.")
+                if nSpecimens == nMaxSamples+1: #len() is index 0!
+                    return False
+            return True
+
+        if not self.ID or not self.LName:
+            dataLogger.error(f"Either Patient ID ({self.ID}) or First Name ({self.LName}) not sufficient to search for samples. Aborting.")
+            return
+        ProfX.return_to_main_menu()
+        #ProfX.send(config.LOCALISATION.PatientEnquiry)
+        ProfX.send("PENQ")
+        ProfX.read_data()
+        ProfX.send(self.ID)
+        ProfX.read_data()
+        if not ProfX.screen.hasErrors:
+            ProfX.send(self.LName[:2])
+            ProfX.read_data()
+            if ProfX.screen.hasErrors:
+                errMsg = ProfX.screen.Errors[0]
+                errMsg = errMsg[len('"No match - Name on file is'):]
+                errMsg = errMsg[:errMsg.find('"')]
+                self.LName = errMsg
+                ProfX.send(self.FName[:1])
+                ProfX.read_data()
+            ProfX.send("S") #Spec select
+            ProfX.send("U") #Unknown specimen
+            ProfX.send('', readEcho=False) #EARLIEST
+            ProfX.read_data() 
+            ProfX.send('', readEcho=False) #LATEST
+            ProfX.read_data()
+            ProfX.send('', readEcho=False) #ALL
+            ProfX.read_data() #Get specimen table
+            
+            while ProfX.screen.DefaultOption == "N":
+                samples = process_whitespaced_table(ProfX.screen.Lines[14:-2], extract_column_widths(ProfX.screen.Lines[12]))
+                if not extract_specimens(samples):
+                    break
+                ProfX.send('N')
+                ProfX.read_data()
+            ProfX.send('Q')
+        ProfX.read_data()
+        ProfX.send('')
+        ProfX.read_data()
+        dataLogger.info("Specimen(s) found. Collecting data...")
+        
+    def add_sample(self, new_sample):
+        IDs = [str(x.ID) for x in self.Samples]
+        if not new_sample.ID in IDs:
+            self.Samples.append(new_sample)
+        #TODO: Cross-compare sample to sample? Complete information?
 
 """Contains data about a Sendaway Assay - receiving location, contact, expected TAT"""
 class ReferralLab():
-    def __init__(self, assayname, setcode, maxtat, contact, email=None):
+    def __init__(self, labname, assayname, setcode, maxtat, contact, email=None):
+        self.Name       = labname
         self.AssayName  = assayname
-        self.Setcode    = setcode
+        self.SetCode    = setcode
         self.MaxTAT     = maxtat
         self.Contact    = contact
         self.Email      = email
 
-    def __str__(self): return f"{self.AssayName} ({self.Setcode}): {self.MaxTAT}. Contact {self.Contact}"
+    def __str__(self): return f"{self.AssayName} ({self.SetCode}): {self.MaxTAT}. Contact {self.Contact}"
 
 
 """ Loads data from Sendaways_Database.tsv, and parses into ReferralLab() instances. Assumes consistent, tab-separated data."""
@@ -607,18 +710,19 @@ def load_sendaways_table(filePath = "S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKB
         email = None
         if tmp[6]:
             email = tmp[6]
-        SAWAYS.append(ReferralLab(assayname=tmp[1], setcode=tmp[0], maxtat=int(tmpTAT), contact=tmp[4], email=email))
+        SAWAYS.append(ReferralLab(labname=tmp[2], assayname=tmp[1], setcode=tmp[0], maxtat=int(tmpTAT), contact=tmp[4], email=email))
     return SAWAYS
 
 """Downloads lists of samples with one or more set(s) beyond their TAT from a named Section (default:AWAY). Optionally, filters for samples by Setcode"""
-def get_overdue_sets(Section:str="AWAY", Setcode:str=None) -> list:
+def get_overdue_sets(Section:str="AWAY", SetCode:str=None, FilterSets:list=None) -> list:
     ProfX.return_to_main_menu()
-    ProfX.send('OVRW', quiet=True)     # Navigate to outstanding sample list
+    #ProfX.send(config.LOCALISATION.SampleOverview, quiet=True)     # Navigate to outstanding sample list
+    ProfX.send("OVRW", quiet=True)
     ProfX.read_data()
     ProfX.send(Section)    # Section AUTOMATION
     ProfX.read_data()
     ProfX.send('0', quiet=True)        # Send output to screen, which in this case is then parsed as our input stream
-    time.sleep(0.5)
+    time.sleep(0.2)
     Samples = []
     while ProfX.screen.DefaultOption != "Q": # Parse overdue samples until there are none left to parse 
         ProfX.read_data()
@@ -626,40 +730,41 @@ def get_overdue_sets(Section:str="AWAY", Setcode:str=None) -> list:
         if (ProfX.screen.length > 5):        # #Presence of non-empty lines after four lines of header implies there are list members to parse
             samples     = process_whitespaced_table(ProfX.screen.Lines[5:-2], extract_column_widths(ProfX.screen.Lines[3]))
             for sample in samples: 
-                _Sample = Specimen(SpecimenID=sample[4])
-                _Sample.LName = sample[3]
-                _Set = TestSet(Sample=sample[4], SetIndex=None, SetCode=sample[6], TimeOverdue=sample[7], RequestedOn=sample[5])
+                _Set = TestSet(Sample=sample[3], SetIndex=None, SetCode=sample[5], TimeOverdue=sample[6], RequestedOn=sample[4])
+                if FilterSets:
+                    if _Set.Code in FilterSets:
+                        continue
+                _Sample = Specimen(SpecimenID=sample[3])
+                _Sample.LName = sample[2]
                 _Sample.Sets.append(_Set)
                 Samples.append(_Sample)
         ProfX.send(ProfX.screen.DefaultOption, quiet=True)
     ProfX.send('Q', quiet=True) #for completeness' sake, and so as to not block i guess
-    if Setcode is not None: 
-        Samples = [x for x in Samples if Setcode in x.SetCodes]
-        dataLogger.info("Located %s overdue samples for section '%s' with Set '%s'." % (len(Samples), Section, Setcode))
+    if SetCode is not None: 
+        Samples = [x for x in Samples if SetCode in x.SetCodes]
+        dataLogger.info("get_overdue_sets(): Located %s overdue samples for section '%s' with Set '%s'." % (len(Samples), Section, SetCode))
     else:
-        dataLogger.info("Located %s overdue samples for section '%s'" % (len(Samples), Section))
+        dataLogger.info("get_overdue_sets(): Located %s overdue samples for section '%s'" % (len(Samples), Section))
     return(Samples)
            
-""" Retrieves specimen data, by sample ID string. """
-def download_specimen_data_by_id(SampleIDs=None, Sets:list=None, GetNotepad:bool=False, GetComments:bool=False, ValidateSamples:bool=True):
-    raise NotImplementedError
-
-""" Retrieves Specimen data (demographics, etc) for any Specimen object in the list SampleObjs. 
-    Can also retreive tests run, test result(s), comments, and specimen notepad data.
+""" Retrieves Specimen data (demographics, etc) for any Specimen object in the list SampleObjs.
+    Option GetFurther also retrieves Clinical Details and NHS Number.
+    Can also retreive Sets run, Set result(s), Set comments, and Specimen Notepad data.
     If FillSets is true, loads all available data, else, only attempts to complete TestSet obj present in the Specimen"""
     #TODO: Comments for Sendaways still not always coming across
-def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetComments:bool=False, ValidateSamples:bool=True, FillSets:bool=False, FilterSets:list=None):
+def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetComments:bool=False, GetFurther:bool=False, ValidateSamples:bool=True, FillSets:bool=False, FilterSets:list=None):
+    if type(SampleObjs)==Specimen:
+        SampleObjs = [SampleObjs]
 
     def extract_set_comments(SetToGet):
         ProfX.send('S', quiet=True)    # enter Set comments
-        while (ProfX.screen.DefaultOption != 'B'): # As long as there are more comments to read (TODO: does TP default to Next Screen?)
+        while (ProfX.screen.DefaultOption != 'B'):
             ProfX.read_data()
             CommStartLine = -1  # How many lines results take up varies from set to set!
-            #PossCommStartLines = range(5, len(ProfX.screen.Lines)-1) #Comments start on the first line after line 5 that has no highlighted items  (or is it ONLY highlighted items?) in it.
-            PossCommStartLines = range(5, ProfX.screen.length-1) #Comments start on the first line after line 5 that has no highlighted items  (or is it ONLY highlighted items?) in it.
+            PossCommStartLines = range(5, ProfX.screen.length-1) #Comments start on the first line after line 5 that has *only* highlighted items in it.
             for line in PossCommStartLines:
                 currentANSIs = [x for x in ProfX.screen.ParsedANSI if x.line == line and x.deleteMode == 0]
-                areHighlighted = [x for x in currentANSIs if x.highlighted==True]
+                areHighlighted = [x.highlighted for x in currentANSIs]
                 if all(areHighlighted): #All elements on this line after line 5 are highlighted
                     CommStartLine = line    # thus, it is the line we want
                     break                   # and since we only need the first line that fulfills these criteria, no need to loop further
@@ -671,42 +776,66 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             ProfX.send(ProfX.screen.DefaultOption, quiet=True) 
         ProfX.read_data()
 
-    def extract_results(SetToGet):
-        #dataLogger.debug("complete_specimen_data_in_obj(): extract_results(): Downloading results for set %s" % SetToGet.Code)
+    def extract_results(SetToGet, SampleCollectionTime):
+        dataLogger.debug("complete_specimen_data_in_obj(): extract_results(): Downloading results for set %s" % SetToGet.Code)
         SetHeaderWidths = extract_column_widths(ProfX.screen.Lines[6])
-        SetResults = process_whitespaced_table(ProfX.screen.Lines[7:-2], SetHeaderWidths)
-        #TODO: Parse into Result Objects - Analyte, Result, Units, Flags, Comment
-
-        AuthData = [x for x in ProfX.screen.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
+        SetResultData = process_whitespaced_table(ProfX.screen.Lines[7:-2], SetHeaderWidths)
+    
+        
         SetAuthUser = "[Not Authorized]"
         SetAuthTime = "[Not Authorized]"
-        if AuthData:
-            if not AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
-                SetAuth         = [x for x in ProfX.screen.ParsedANSI if x.line == 4 and x.highlighted == True]
-                SetAuthUserData     = [x for x in SetAuth if x.column == 11]
-                if SetAuthUserData:
-                    SetAuthUser = SetAuthUserData[0].text
-                SetAuthTimeData     = [x for x in SetAuth if x.column == 29][0].text
-                if SetAuthTimeData:
-                    SetAuthTime = SetAuthTimeData[0].text    
+        SetRepTime = "[Not Reported]"
+
+        #TODO: Get set status. No point looking for line 21 if it's released!
+        SetIsAuthed = False
+        if SetToGet.Status:
+            if SetToGet.Status[0]=="R":
+                SetIsAuthed = True
+
+        if not SetIsAuthed:
+            AuthData = [x for x in ProfX.screen.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
+            if AuthData:
+                if not AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
+                    SetIsAuthed = True
+        
+        if SetIsAuthed:
+            SetAuthData = [x for x in ProfX.screen.ParsedANSI if x.line == 4 and x.highlighted == True]
+            SetAuthData.sort()
+            SetAuthUser = SetAuthData[1].text
+            SetAuthTime = SetAuthData[0].text
+            SetRepData      = [x for x in ProfX.screen.ParsedANSI if x.line == 5 and x.highlighted == True]
+            if SetRepData:
+                    SetRepTime = SetRepData[0].text
+        
+        for ResultLine in SetResultData:
+            Analyte = ResultLine[0]
+            Flag=None
+            if Analyte[-1]=='+' or Analyte[-1]=='-':
+                Analyte = ResultLine[0][:-1].strip()
+                Flag = ResultLine[0][-1]
+            ResObj = SetResult(Analyte=Analyte, Value=ResultLine[1], Units=ResultLine[2], SampleTaken=SampleCollectionTime, ReportedOn=SetRepTime, AuthDateTime=SetAuthTime, Flags=Flag)
+            SetToGet.Results.append(ResObj)
+        
         SetToGet.AuthedOn = SetAuthTime
         SetToGet.AuthedBy = SetAuthUser
-        SetToGet.Results =  SetResults
 
     if len(SampleObjs)==0: 
         dataLogger.warning("Could not find any Samples to process. Exiting program.")
         return
 
     ProfX.return_to_main_menu()
-    ProfX.send("SENQ", quiet=True) #Move to specimen inquiry 
+    #ProfX.send(LOCALISATION.SpecimenEnquiry, quiet=True) #Move to specimen inquiry 
+    ProfX.send("SENQ", quiet=True)
     ProfX.read_data()
     SampleCounter = 0
     nSamples = len(SampleObjs)
     ReportInterval = max(min(250, int(nSamples*0.1)), 1)
-    #dataLogger.info("complete_specimen_data_in_obj(): Starting specimen data download.")
 
     for Sample in SampleObjs: 
-        dataLogger.info(f"complete_specimen_data_in_obj(): Retrieving specimen [{Sample.ID}]...")
+        if Sample.ID[:1] == "19":
+            dataLogger.info("complete_specimen_data_in_obj(): Avoiding specimen(s) from 2019, which can induce a crash on access.")    
+            continue
+        #dataLogger.info(f"complete_specimen_data_in_obj(): Retrieving specimen [{Sample.ID}]...")
         if (ValidateSamples and not Sample.validate_ID()):
             dataLogger.warning("complete_specimen_data_in_obj(): Sample ID '%s' does not appear to be valid. Skipping to next..." % Sample.ID)
             continue
@@ -714,10 +843,12 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         ProfX.read_data(max_wait=400)   # And read screen.
         if (ProfX.screen.hasErrors == True):
             # Usually the error is "No such specimen"; the error shouldn't be 'incorrect format' if we ran validate_ID().
-            dataLogger.warning("complete_specimen_data_in_obj(): '%s'" % ";".join(ProfX.screen.Errors))
+            dataLogger.warning(f"complete_specimen_data_in_obj(): '%s'" % ";".join(ProfX.screen.Errors))
         else:
-            Sample.from_chunks(ProfX.screen.ParsedANSI)  #Parse sample data, which includes patient name, DOB, location, avalable test code(s) and their status.
-            #TODO: it's here that all other sets are added, and thus will be retrieved. Filter here?
+            _SetCodes = Sample.SetCodes
+            Sample.from_chunks(ProfX.screen.ParsedANSI)  #Parse sample data, including patient details, sets, and assigning Specimen.Collected DT.
+            if FillSets == False:
+                Sample.Sets = [x for x in Sample.Sets if x.Code in _SetCodes]
 
             if (GetNotepad == True):
                 if(Sample.hasNotepadEntries == True):
@@ -734,14 +865,14 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                             _entryData = entryLine.text.split(" ")
                             _entryData = [x for x in _entryData if x != ""]
                             if len(_entryData) > 5:
-                                #todo: this never procced but also it worked for for up to 4 entries
+                                #todo: this never procced, ensure it works
                                 dataLogger.debug("There are likely two specimen notepad entries in line '%s'" % entryLine)
                                 SNObjects.append(SpecimenNotepadEntry(_entryData[7], _entryData[6], "", _entryData[5].strip(")"), _entryData[8]+" "+_entryData[9])) #THEORETICAL - not tested yet
                             SNObjects.append(SpecimenNotepadEntry(_entryData[2], _entryData[1], "", _entryData[0].strip(")"), _entryData[3]+" "+_entryData[4]))
                         for SNEntry in SNObjects:
                             ProfX.send(SNEntry.Index, quiet=True)  # Open the entry 
                             ProfX.read_data()           # Receive data
-                            #TODO: What if more than one page of text (lol)
+                            #TODO: What if more than one page of text?
                             SNText = list(map(lambda x: x.text, ProfX.screen.ParsedANSI[2:-2]))
                             SNEntry.Text = ";".join(SNText)# Copy down the text and put it into the instance
                             ProfX.send("B", quiet=True)            # Go BACK, not default option QUIT 
@@ -750,6 +881,24 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                         Sample.NotepadEntries = SNObjects
                         ProfX.send("Q", quiet=True)                # QUIT specimen notepad
                         ProfX.read_data()               # Receive data
+            
+            if (GetFurther == True):
+                #Retrieve NHS Number and Clinical Details, which are not visible on main screen...
+                ProfX.send("F", quiet=True)
+                ProfX.read_data()
+                ProfX.send("1", quiet=True)
+                ProfX.read_data()
+                Sample.NHSNumber = Screen.chunk_or_none(ProfX.screen.ParsedANSI, line=17, column=37, highlighted=True)
+                
+                ProfX.send("4", quiet=True)
+                ProfX.read_data()   # And read screen.
+                Details = ProfX.screen.Lines[11].strip()
+                if Details:
+                    Sample.ClinDetails = Details
+                
+                ProfX.send("Q", quiet=True)
+                ProfX.read_data()
+
             if (Sample.Sets): 
                 for SetToGet in Sample.Sets:
                     if FilterSets:
@@ -763,18 +912,18 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                     ProfX.read_data()
 
                     if (ProfX.screen.Type == "SENQ_DisplayResults"):
-                        extract_results(SetToGet)
+                        extract_results(SetToGet, Sample.Collected)
                         if ("Set com" in ProfX.screen.Options and GetComments==True):
                             extract_set_comments(SetToGet)
 
                     elif (ProfX.screen.Type == "SENQ_Screen3_FurtherSetInfo"): 
                         SetToGet.AuthedOn = "[Not Authorized]"
                         SetToGet.AuthedBy = "[Not Authorized]"
-                        SetToGet.Results = None
+                        SetToGet.Results = []
                         if ("Results" in ProfX.screen.Options):
                             ProfX.send('R', quiet=True)
                             ProfX.read_data(max_wait=400)
-                            extract_results(SetToGet)
+                            extract_results(SetToGet, Sample.Collected)
                             if ("Set com" in ProfX.screen.Options and GetComments==True):
                                 extract_set_comments(SetToGet)
                             ProfX.send('B', quiet=True)
@@ -792,20 +941,49 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         SampleCounter += 1
         Pct = (SampleCounter / nSamples) * 100
         if( SampleCounter % ReportInterval == 0): 
-            dataLogger.info("complete_specimen_data_in_obj(): Retrieved data for %d of %d samples (%.2f%%)"% (SampleCounter, nSamples, Pct))
+            dataLogger.info(f"complete_specimen_data_in_obj(): {SampleCounter} of {nSamples} samples ({Pct:.2f}%) complete")
+    time.sleep(0.1)
     #for Sample in Samples
     dataLogger.info("complete_specimen_data_in_obj(): All downloads complete.")
 
 """ Supposed to retrieve the most recent n samples with a specified set, via SENQ"""
 def get_recent_samples_of_set_type(Set:str, nSamples:int, FirstDate:datetime.datetime) -> list:
-    #SENQ
-    #U
-    #FirstDate or ENTER, handle error
-    #SecondDAte or ENTER, handle error
-    #Set,  handle error
-    # enter enter enter
+    raise NotImplementedError
+    #TODO Finish
+    ProfX.return_to_main_menu()
+    #ProfX.send(config.LOCALISATION.SpecimenEnquiry)
+    ProfX.send("SENQ")
+    ProfX.read_data()
+    ProfX.send("U") #Engages search function
+    ProfX.read_data()
+    #Submit FirstDate or ENTER, handle error
+    #Submit SecondDate or ENTER, handle error
+    #Submit Set,handle error
+    #Submit enter enter enter
     #read in page, parse sample(s) (get result(s))
+    #change page?
+    #extract again
 
     pass
 
+""" Loads simple text file and transforms it into a list of ReferenceRange objects"""
+def load_reference_ranges(filePath="S:/CS-PATHOLOGY/BIOCHEMISTRY/Z Personal/LKBecker/STP/Limits.txt"):
+    RefRanges = []
+    if not os.path.isfile(filePath):
+        raise IOError
+    with open(filePath, 'r') as RefRangeFile:
+        for line in RefRangeFile:
+            tmp = line.split("\t")
+            tmp = [x.strip() for x in tmp]
+            if tmp[0]=="Analyte": continue
+            RefRanges.append( ReferenceRange(Analyte=tmp[0], Upper=tmp[3], Lower=tmp[2], Unit=tmp[1]) )
+    return RefRanges
 
+""" Utility function, testing for truth, otherwise returning None"""
+def value_or_none(item):
+    if item:
+        return item
+    return None
+
+REF_RANGES = load_reference_ranges()
+PATIENTSTORE = PatientContainer()

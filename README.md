@@ -7,22 +7,22 @@
 
 <!-- GETTING STARTED -->
 ## Getting Started
-
 To get a local copy up and running follow these simple steps.
 
 ### Prerequisites
-
 * python 3.7 or later
 * matplotlib, for advanced features
 * a computer able to connecte to your target LIMS
   
 <!-- USAGE EXAMPLES -->
 ## Usage
-Edit main.py with the commands as required.
+Update `localisation.py` with your local TelePath instance's commands
+Use main.py to access commands. A CLI is planned for future release.
 
 
 <!-- ROADMAP -->
 ## Roadmap
+
 
 <!-- LICENSE -->
 ## License

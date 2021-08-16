@@ -8,120 +8,172 @@
         Extend Specimen() with matplotlib graphing function, or data dump (table format) -> hook into WriteToFile.
     main
         command line arg parser lol"""
-VERSION = "1.6.0"
-LOGFORMAT = '%(asctime)s:%(name)-10s:%(levelname)-7s:%(message)s'
+VERSION = "1.6.5"
+LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
 #import argparse
+import config
 import datetime
 import logging
 import tp_structs
 from tp_telnet import ProfX
 from tp_utils import process_whitespaced_table, timestamp
+from collections import Counter
+import time
+
 
 """ Locates samples with AOT beyond TAT (...i.e. any), and marks the AOT as 'NA' if insert_NA_result is set to True """
-def aot_stub_buster(insert_NA_result:bool=False) -> None:
+def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> None:
+    logging.info(f"aot_stub_buster(): Start up. Gathering history: {get_creators}. NAing entries: {insert_NA_result}.")
     AOTSamples = tp_structs.get_overdue_sets("AUTO", "AOT")
-    logging.info(f"aot_stub_buster: There are {len(AOTSamples)} samples with Set AOT that is overdue.")
-    if(insert_NA_result == True):
-        ProfX.return_to_main_menu()
-        ProfX.send('SENQ', quiet=True)         # Go into Specimen Inquiry
+    AOTStubs = Counter()
+    logging.info(f"aot_stub_buster(): There are {len(AOTSamples)} samples with an overdue AOT.")
+    
+    if (insert_NA_result == False and get_creators == False):
+        logging.info("aot_stub_buster() complete.")
+        return
+
+    logging.info("aot_stub_buster(): Full autofire.")
+    ProfX.return_to_main_menu()
+    ProfX.send("SENQ", quiet=True)         # Go into Specimen Inquiry
+    #ProfX.send(config.LOCALISATION.SpecimenEnquiry, quiet=True)         # Go into Specimen Inquiry
+    ProfX.read_data()
+    for AOTSample in AOTSamples: #TODO: issue here; loop likes to get same sample X times...
+        ProfX.send(AOTSample.ID, quiet=True, maxwait_ms=2000)  #Open record
         ProfX.read_data()
-        for AOTSample in AOTSamples:
-            ProfX.send(AOTSample, quiet=True)  #Open record
-            ProfX.read_data()
-            SampleData = tp_structs.Specimen(AOTSample, ProfX.screen.ParsedANSI)
-            TargetIndex = SampleData.get_set_index("AOT")
-            logging.debug("AOT test should be at index %d for sample %s" % (TargetIndex, SampleData.ID))
+        AOTSample.from_chunks(ProfX.screen.ParsedANSI) #sometimes around here we get "max() arg is an empty sequence"
+        TargetIndex = AOTSample.get_set_index("AOT")
         
-            ProfX.send('U'+str(TargetIndex), quiet=True)   #Open relevant test record
-            ProfX.send('NA')                  #Fill Record
+        if TargetIndex == -1:
+            logging.error(f"Cannot locate AOT set for patient {AOTSample.ID}. Please check code and.or retry.")
+            ProfX.send('') #Exit record
+            continue
+        if get_creators == True:
+            logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
+            ProfX.send('H'+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
+            ProfX.read_data()
+            if not ProfX.screen.hasErrors:
+                #locate line with 'Set requested by: '
+                for line in ProfX.screen.Lines[6].split("\r\n"):
+                    if line.find("Set requested by: ") != -1:
+                        user = line[ line.find("Set requested by: ")+len("Set requested by: "): ].strip()
+                        AOTStubs[ user ] += 1
+                ProfX.send('Q')
+                ProfX.read_data()
+
+        if(insert_NA_result == True):
+            logging.info(f"aot_stub_buster(): Closing Set [AOT] (#{TargetIndex}) for Sample [{AOTSample.ID}]...")
+            ProfX.send('U'+str(TargetIndex), quiet=True)  #Open relevant test record
+            ProfX.read_data()
+            #TODO: Check screen type!
+            ProfX.send('NA')                              #Fill Record
+            ProfX.read_data()
             ProfX.send('R', quiet=True)                   #Release NA Result
             #TODO: Check if you get the comment of "Do you want to retain ranges"! Doesn't happen for AOT but...
-            ProfX.send('', quiet=True)                     #Close record
-        #for AOTSample
-    #if insert_NA_result == True
+            ProfX.read_data()
+            #TODO: Error(?) in screen rendered seems to shift the IDLine, which 'should' be 'Direct result entry Request <XXX>'
+            #if ProfX.screen.Lines[2].split() #Direct result entry           Request: 
+            # if there's the interim screen, send another ''
+        ProfX.send('', quiet=True)                    #Close record
+    #for AOTSample
+
+    if get_creators==True:
+        with open(f'S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/AOTCreators_{timestamp(fileFormat=True)}.log', 'w') as AOTData:
+            AOTData.write(f"AOT sets, created {timestamp()}\n")
+            AOTData.write("User\tNumber of AOT Stubs\n")
+            for key, value in AOTStubs.most_common():
+                AOTData.write(f"{key}\t{value}\n")
+    logging.info("aot_stub_buster(): Complete.")
 
 """ Retrieves outstanding sendaway (section AWAY) samples. For each sample, retrieves specimen notepad contents, patient details, and any set comments. """
-def sendaways_scan() -> None:
-    SAWAY_DB = tp_structs.load_sendaways_table()
-    logging.info("sendaways_scan(): Sendaways database loaded.")
-    OverdueSAWAYs = tp_structs.get_overdue_sets("AWAY")    # Retrieve AWAY results from OVRW
+def sendaways_scan(getDetailledData:bool=False) -> None:
+    OverdueSAWAYs = tp_structs.get_overdue_sets("AWAY", FilterSets=["ACOV2", "COVABS"])    # Retrieve AWAY results from OVRW
     #19.0831826.N - Sample stuck in Background Authoriser since 2019, RIP.
-    #OverdueSAWAYs = [x for x in OverdueSAWAYs if x  ]
-    
-    # For each sample, retrieve details: Patient FNAME LNAME DOB    
-    tp_structs.complete_specimen_data_in_obj(OverdueSAWAYs, GetNotepad=True, GetComments=True, ValidateSamples=False, FillSets=False)
-    outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_SawayData.txt"
-    SAWAY_Counters = range(0, len(OverdueSAWAYs))
-    logging.info("sendaways_scan(): Beginning to write overdue sendaways to file...")
-    with open(outFile, 'w') as SAWAYS_OUT:
-        SAWAYS_OUT.write("Specimen\tLastname\tFirst Name\tDOB\tReceived\tTest\tTest Name\tReferral Lab Contact\tHours Overdue\tHours Since Request\tExpected TAT\tNPEx\tCurrent Action\tAction Log\tSample Status\tSetComms\tSpecN'Pad\n")
-        for SAWAY_Sample in OverdueSAWAYs:
-            try:
-                OverdueSets = [x for x in SAWAY_Sample.Sets if x.is_overdue]
-                for OverdueSet in OverdueSets:
-                    #Specimen   Lastname    First Name  DOB Received    Test
-                    outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}\t{SAWAY_Sample.DOB}\t{SAWAY_Sample.Received.strftime('%d/%m/%y')}\t{OverdueSet.Code}\t"
-                    
-                    #Retrieve Referral lab info
-                    ReferralLab_Match = [x for x in SAWAY_DB if x.Setcode == OverdueSet.Code]
-                    if(len(ReferralLab_Match)==1):
-                        ReferralLab_Match = ReferralLab_Match[0]
-                    #Test Name  Referral Lab Contact
-                    LabStr = "[Not Found]\t[Not Found]\t"
-                    if ReferralLab_Match:
-                        LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Contact}\t"
-                        if ReferralLab_Match.Email:
-                            LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Email}\t"
-                    outStr = outStr + LabStr
-                    
-                    #Hours Overdue
-                    outStr = outStr + f"{OverdueSet.Overdue.total_seconds()/3600}\t"
-                    
-                    #Hours Since Request
-                    HSinceRequest = -1
-                    if OverdueSet.RequestedOn:
-                        if isinstance(OverdueSet.RequestedOn, datetime.datetime):
-                            HSinceRequest = (datetime.datetime.now()-OverdueSet.RequestedOn).total_seconds()//3600
-                            outStr = outStr + f"{HSinceRequest}\t"
-                    else:
-                        outStr = outStr + "#N/A\t"
-                    
-                    #Expected TAT   NPEx    CurrentAction   Action Log
-                    ExpectedTAT = -1
-                    if ReferralLab_Match:
-                        ExpectedTAT = ReferralLab_Match.MaxTAT
-                        outStr = outStr + f"{ExpectedTAT}\t\t\t\t"
-                    else:
-                        outStr = outStr + "[Unknown]\t\t\t\t"
-                        
-                    #Sample Status
-                    StatusStr = "Incomplete\t"
-                    if (HSinceRequest>0 and ExpectedTAT>0):
-                        if(HSinceRequest <= ExpectedTAT):
-                            StatusStr = "TAT not elapsed\t"
-                    outStr = outStr + StatusStr
-                    
-                    #Check for comments
-                    CommStr = "\t"
-                    if OverdueSet.Comments: 
-                        CommStr = f"{' '.join(OverdueSet.Comments)}\t"
-                    outStr = outStr + CommStr
-                    
-                    #Check for Notepad
-                    NPadStr = "\t"
-                    if SAWAY_Sample.hasNotepadEntries == True:
-                        NPadStr = "%s\t" % ("|".join([str(x) for x in SAWAY_Sample.NotepadEntries]))
-                    outStr = outStr + NPadStr
-                
-                    outStr = outStr + "\t\t\n"
-                    SAWAYS_OUT.write(outStr)
-    
-            except AssertionError:
-                continue
-                
-    logging.info(f"sendaways_scan(): Complete. Downloaded and exported data for {len(SAWAY_Counters)} overdue sendaway samples to file.")
+    logging.info(f"sendaways_scan(): There are a total of {len(OverdueSAWAYs)} overdue samples from section 'AWAY', which are not COVABS/ACOV2.")
+    if getDetailledData:
+        SAWAY_DB = tp_structs.load_sendaways_table()
+        # For each sample, retrieve details: Patient FNAME LNAME DOB    
+        tp_structs.complete_specimen_data_in_obj(OverdueSAWAYs, GetNotepad=True, GetComments=True, GetFurther=True, ValidateSamples=False, FillSets=False)
+        outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_SawayData.txt"
+        SAWAY_Counters = range(0, len(OverdueSAWAYs))
+        logging.info("sendaways_scan(): Beginning to write overdue sendaways to file...")
+        with open(outFile, 'w') as SAWAYS_OUT:
+            SAWAYS_OUT.write("Specimen\tNHS Number\tLast Name\tFirst Name\tDOB\tSample Taken\tTest\tTest Name\tReferral Lab\tContact Lab At\tHours Overdue\tCurrent Action\tAction Log\tRecord Status\tClinical Details\tSetComms\tSpecN'Pad\n")
+            for SAWAY_Sample in OverdueSAWAYs:
+                try:
+                    OverdueSets = [x for x in SAWAY_Sample.Sets if x.is_overdue]
+                    for OverdueSet in OverdueSets:
+                        #Specimen NHSNumber   Lastname    First Name  DOB Received    Test
+                        outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.NHSNumber}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}\t{SAWAY_Sample.DOB}\t{SAWAY_Sample.Received.strftime('%d/%m/%y')}\t{OverdueSet.Code}\t"
 
+                        #Retrieve Referral lab info
+                        ReferralLab_Match = [x for x in SAWAY_DB if x.SetCode == OverdueSet.Code]
+                        if(len(ReferralLab_Match)==1):
+                            ReferralLab_Match = ReferralLab_Match[0]
+                        #Test Name  Referral Lab Contact
+                        LabStr = "[Not Found]\t[Not Found]\t[Not Found]\t"
+                        if ReferralLab_Match:
+                            LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Contact}\t"
+                            if ReferralLab_Match.Email:
+                                LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Email}\t"
+                        outStr = outStr + LabStr
+                        
+                        #Hours Overdue
+                        outStr = outStr + f"{OverdueSet.Overdue.total_seconds()/3600}\t"
+                        
+                        ##Hours Since Request
+                        HSinceRequest = -1
+                        if OverdueSet.RequestedOn:
+                            if isinstance(OverdueSet.RequestedOn, datetime.datetime):
+                                HSinceRequest = (datetime.datetime.now()-OverdueSet.RequestedOn).total_seconds()//3600
+                        #        outStr = outStr + f"{HSinceRequest}\t"
+                        #else:
+                        #    outStr = outStr + "#N/A\t"
+                        
+                        #Expected TAT
+                        ExpectedTAT = -1
+                        if ReferralLab_Match:
+                            ExpectedTAT = ReferralLab_Match.MaxTAT
+                        #    outStr = outStr + f"{ExpectedTAT}\t"
+                        #else:
+                        #    outStr = outStr + "[Unknown]\t"
+                        
+                        # CurrentAction   Action Log
+                        outStr = outStr + "\t\t"
+                            
+                        #Sample Status
+                        StatusStr = "Incomplete\t"
+                        if (HSinceRequest>0 and ExpectedTAT>0):
+                            if(HSinceRequest <= ExpectedTAT):
+                                StatusStr = "Incomplete (below TAT)\t"
+                        outStr = outStr + StatusStr
+
+                        #Clinical Details
+                        if SAWAY_Sample.ClinDetails:
+                            outStr = outStr + SAWAY_Sample.ClinDetails + "\t"
+                        else:
+                            outStr = outStr + "No Clinical Details\t"
+                        #Check for comments
+                        CommStr = "\t"
+                        if OverdueSet.Comments: 
+                            CommStr = f"{' '.join(OverdueSet.Comments)}\t"
+                        outStr = outStr + CommStr
+                        
+                        #Check for Notepad
+                        NPadStr = "\t"
+                        if SAWAY_Sample.hasNotepadEntries == True:
+                            NPadStr = "%s\t" % ("|".join([str(x) for x in SAWAY_Sample.NotepadEntries]))
+                        outStr = outStr + NPadStr
+                    
+                        outStr = outStr + "\n"
+                        SAWAYS_OUT.write(outStr)
+        
+                except AssertionError:
+                    continue
+                    
+        logging.info(f"sendaways_scan(): Complete. Downloaded and exported data for {len(SAWAY_Counters)} overdue sendaway samples to file.")
+
+""" Retrieves privilege levels for a list of users"""
 def privilege_scan(userlist = None) -> None:
     #TODO: UNTESTED UTILITY FUNCTION
     UserPrivs = []
@@ -140,10 +192,10 @@ def privilege_scan(userlist = None) -> None:
         userlist = [x.trim() for x in userlist]
     
     logging.error("privilege_scan(): FUNCTION ISN'T DONE YET")
-    raise NotImplementedError()
     
-    #Enter administration area, needs privilege on TelePath user to access
-    ProfX.send('PRIVS') #requires Level 1 access, do not write here.
+    #Enter administration area - needs privilege on TelePath user to access
+    ProfX.send("PRIVS")
+    #ProfX.send(config.LOCALISATION.Privileges) #requires Level 1 access, do *not* write data to this area to avoid messing up the system.
     ProfX.read_data()
     assert ProfX.screen.Type == "PRIVS"
 
@@ -151,9 +203,9 @@ def privilege_scan(userlist = None) -> None:
         ProfX.send(user)
         ProfX.read_data() #Check access was successful
 
-        #TODO: If querying an account that does not exist, the cursor goes to line... 6? (TODO:check it's line 6),to make a new account abort via ProfX.send('^')
+        #TODO: If querying an account that does not exist, the cursor goes to line... 6? (TODO:check it's line 6), to make a new account; abort via ProfX.send('^')
         if ProfX.screen.cursorPosition[0]<20:
-            logging.info(f"User '{user}' does not appear to exist on this system.")
+            logging.info(f"privilege_scan(): User '{user}' does not appear to exist on the system.")
             ProfX.send('^') #Return to main screen, ready for next
             continue
         
@@ -173,22 +225,64 @@ def privilege_scan(userlist = None) -> None:
             out.write(line)
     logging.info("privilege_scan(): Complete.")
 
-def mass_download(FilterSets:list=None):
-    with open("S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/ToRetrieve.txt", 'r') as DATA_IN:
-        samples = DATA_IN.readlines()
-    samples = [x.strip() for x in samples]
-    samples = [tp_structs.Specimen(x) for x in samples]
-    tp_structs.complete_specimen_data_in_obj(samples, FilterSets=FilterSets)
-    
+""" retrieves a list of recent speciments for a patient, and runs mass_download() on them. """
+def patient_download(FilterSets:list=None):
+    pass
+
+""" Retrieves assay results for a list of Specimens.
+    FilterSets: A list of strings, designating which """
+def mass_download(Samples:list=None, FilterSets:list=None):
+    if not Samples:
+        logging.info("mass_download(): No samples supplied, loading from file")
+        with open("S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/ToRetrieve.txt", 'r') as DATA_IN:
+            Samples = DATA_IN.readlines()
+        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
+    logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
+    tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=True, GetComments=True)
+    logging.info("mass_download(): Writing data to file.")
     outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_TPDownload.txt"
     with open(outFile, 'w') as DATA_OUT:
-        DATA_OUT.write("SampleID\tSet\tResult(s)\n")
-        for sample in samples:
+        DATA_OUT.write("SampleID\tRequested On\tSet\tStatus\tResult(s)\tComments\n")
+        for sample in Samples:
             if sample.Sets:
-                for _set in sample.Sets:
-                    DATA_OUT.write(f"{sample.ID}\t{_set.Code}\t{_set.Results}\n") #TODO: Results parser (strip empties etc)
-        DATA_OUT.write("End Of Line\n")
+                date = None
+                if sample.Collected:
+                    date = sample.Collected.strftime("%d/%m/%Y %H:%M")
+                if sample.Received and not date:
+                    date = sample.Received.strftime("%d/%m/%Y %H:%M")
 
+                for _set in sample.Sets:
+                    if FilterSets:
+                        if _set.Code not in FilterSets: 
+                            continue
+                    if _set.RequestedOn and not date:
+                        date = _set.RequestedOn.strftime("%d/%m/%Y %H:%M")
+                    if not date:
+                        date = "Unknown"
+                    if _set.Results:
+                        for _result in _set.Results:
+                            ComStr = ' '.join(_set.Comments)
+                            DATA_OUT.write(f"{sample.ID}\t{date}\t{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n")
+                    if sample.hasNotepadEntries == True:
+                        NPadStr = "%s\t" % ("|".join([str(x) for x in sample.NotepadEntries]))
+                        DATA_OUT.write(f"{sample.ID}\t{date}\tSpecimen Notepad\t\t{NPadStr}\n")
+    logging.info("mass_download(): Complete.")
+
+""" Experimental graph producer. Not working currently. """
+def visualise(Sample:str, FilterSets:list=None, nMaxSamples:int=10):
+    #From Sample To Patient
+    _tmpSample = tp_structs.Specimen(Sample)
+    if not _tmpSample.validate_ID():
+        logging.info(f"visualise(): {Sample} is not a valid specimen ID. Abort.")
+        return
+    tp_structs.complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True)
+    Patient = tp_structs.PATIENTSTORE[_tmpSample.PatientID]
+    Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
+    if FilterSets:
+        tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=False, ValidateSamples=False, FilterSets=FilterSets)
+    else:
+        tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False)
+    Patient.create_plot(FilterAnalytes=FilterSets)
 
 logging.basicConfig(filename='S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
@@ -196,14 +290,16 @@ console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter(LOGFORMAT))
 logging.getLogger().addHandler(console)
 
-logging.info(f"Starting ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
+logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
 
 try:
     ProfX.connect()#TrainingSystem=True)
-    #get_recent_results("A,21.0225526.L", 28)
-    #aot_stub_buster()
-    #sendaways_scan()
-    mass_download(["CORT"])
+    aot_stub_buster()
+    #aot_stub_buster(insert_NA_result=True, get_creators=True)
+    sendaways_scan()
+    #endaways_scan(getDetailledData=True)
+    #mass_download()
+    visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
 
 except Exception as e: 
     logging.error(e)

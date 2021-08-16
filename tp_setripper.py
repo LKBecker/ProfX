@@ -3,6 +3,8 @@ from tp_telnet import ProfX, Screen
 from tp_utils import process_whitespaced_table, extract_column_widths
 import time
 
+#import config
+
 import logging
 setRipperLogger = logging.getLogger(__name__)
 
@@ -156,7 +158,8 @@ def get_Set_definitions(Sets:list, reckless=False):
         return True
 
     ProfX.return_to_main_menu()
-    ProfX.send('SETM')
+    ProfX.send("SETM")
+    #ProfX.send(LOCALISATION.SetMaintenance)
     ProfX.read_data()
     ProfX.send('A')
     ProfX.read_data()
@@ -212,7 +215,8 @@ def get_NPCL_Interventions(NPCL_Lists:list):
             NPCL_Lists = [NPCL_Lists]
     for NPCL_List in NPCL_Lists:
         ProfX.return_to_main_menu()
-        ProfX.send('NPSET')  
+        #ProfX.send(LOCALISATION.NPCLSettings)
+        ProfX.send("NPSET")
         ProfX.read_data()
         setRipperLogger.info(f"Retrieving auto-Authorization Interventions for NPCL list '{NPCL_List.AuthCode}'...")
         ProfX.send(NPCL_List.AuthCode)
@@ -274,7 +278,8 @@ def get_authorisation_group_structure(SNPCLLists:set):
                 Page_Has_Blanks = True 
 
     ProfX.return_to_main_menu()
-    ProfX.send('SNPCL')
+    #ProfX.send(LOCALISATION.SNPCLSettings)
+    ProfX.send("SNPCL")
     ProfX.read_data()
     
     for SNPCLList in SNPCLLists:
@@ -297,7 +302,8 @@ def get_authorisation_group_structure(SNPCLLists:set):
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} does not appear to exist. This shouldn't happen if fed from set_ripper().")
             ProfX.send('^')        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
             ProfX.read_data()
-            ProfX.send('SNPCL')    # So we just need to return...
+            #ProfX.send(LOCALISATION.SNPCLSettings)    # So we just need to return...
+            ProfX.send("SNPCL")
             ProfX.read_data()
             continue
 
@@ -331,7 +337,8 @@ def get_authorisation_group_structure(SNPCLLists:set):
 def get_autocomment_structure(AUCOMSets:set):
     AUCOM_Data = []
     ProfX.return_to_main_menu()
-    ProfX.send('AUCOM')
+    #ProfX.send(LOCALISATION.AutoComments)
+    ProfX.send("AUCOM")
     ProfX.read_data()                  
     for AUCOM_Routine in AUCOMSets:
         if not AUCOM_Routine:

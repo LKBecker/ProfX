@@ -1,3 +1,4 @@
+import config
 import getpass
 import logging
 import re
@@ -5,13 +6,8 @@ import struct
 import telnetlib
 import time
 
-import config
-
 telnetLogger = logging.getLogger(__name__)
 
-ASCII_ESC = b'\x1B'
-
-#Classes for handling ANSI data, and turning it into a human and program-readable Screen
 """ Class that holds a chunk of TelePath data and digests it into ParsedANSICommands."""
 class TelePathData():
     ANSICodeSplitter = re.compile("(?=\\x1b[\[|P])", flags=re.M) # "(?=\\x1b\[)"
@@ -40,7 +36,6 @@ class TelePathData():
         currentLine   = 1
         currentColumn = 1
         #currentColor  = "bold;bg blue;fg green" #TelePath default
-        textCounter   = 0
         highlighted   = False
         for chunk in ANSIChunks:
             #print ("processing %s (%s)" % (chunk, chunk.cmdByte))
@@ -220,13 +215,13 @@ class Screen():
         self.hasErrors      = False
         self.CursorRow      = 0
         self.CursorCol      = 0
+        self.prevScreen     = None
 
     def __str__(self):
-        #TODO: seems not to go right with the immediate window - is that just a repr thing?
         return (self.Text)
 
     def __repr__(self): 
-        return (f"Screen({len(self.lines)} lines, {len(self.ParsedANSI)} ANSI chunks)")
+        return (f"Screen({len(self.Lines)} lines, {len(self.ParsedANSI)} ANSI chunks)")
 
     @staticmethod
     def chunk_or_none(chunks, line, column, highlighted=None):
@@ -257,7 +252,7 @@ class Screen():
             tmp = self.Options[-1]
             self.Options[-1] = tmp[:tmp.find('<')-1].strip()
 
-        if len(IDLine)==0: 
+        if not IDLine: 
             telnetLogger.debug("Screen does not have an ID line; Check for error / merge problem?")
             self.Type = "ERROR/NO ID LINE"
             return
@@ -291,8 +286,14 @@ class Screen():
         elif IDLine == "Work beyond its turn around time":
             self.Type = "BeyondTAT"
             if self.Lines[3].split(" ")[0] == "Entry": self.Type = "BeyondTAT_Data"
+        elif IDLine == "Audit Trail Information":
+            self.Type = "Audit"
         elif IDLine == "Enter/edit user i.d.'s and privileges":
             self.Type = "PRIVS"
+        elif IDLine == "Patient demographics":
+            self.Type="SENQ/Demographics"
+        elif IDLine == "Patient enquiry":
+            self.Type ="PENQ"
         elif IDLine == "ON-CALL?": 
             self.Type = "ONCALL_PreMenu"
         
@@ -300,9 +301,11 @@ class Screen():
         if self.Type == "UNKNOWN" and len(IDLineSplit)>=2:
             if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
                 self.Type = "MainMenu"
-            if IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
+            elif IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
                 self.Type = "MainMenu_Training"
-            if " ".join(IDLineSplit[:5]) == "Authorisation group rule definition for": 
+            elif IDLineSplit[0] == "Request:": 
+                self.Type = "ResultEntry/Auth"
+            elif " ".join(IDLineSplit[:5]) == "Authorisation group rule definition for": 
                 self.Type = "SNPCL_Set"
         
         if self.Type == "UNKNOWN": telnetLogger.warning("Could not identify screen '%s'" % IDLine)
@@ -462,10 +465,7 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         elif command in (telnetlib.WILL, telnetlib.WONT): tsocket.send(telnetlib.IAC + telnetlib.DONT + option) 
         #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY.
 
-    """
-    Connects to TelePath and logs in user, querying for Username and Password.
-    TODO: check data returned, if username wrong re-query
-    """
+    """ Connects to TelePath and logs in user, querying for Username and Password. """
     @staticmethod
     def connect(TrainingSystem=False):        
         ProfX.tn.set_option_negotiation_callback(ProfX.set_options) 
@@ -479,14 +479,22 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         ProfX.tn.read_until(b'\x05')
         ProfX.tn.write(b"PTERM:CHM\x0D")
         ProfX.tn.read_until(b"User ID :")
-        user = input("Enter your TelePath username: ")
-        ProfX.send(user)
+        if config.USER:
+            ProfX.send(config.USER)
+        else:
+            user = input("Enter your TelePath username: ")
+            ProfX.send(user)
+            #TODO: check data returned, if username wrong re-query
         ProfX.tn.read_until(b"Password:")
-        PW = getpass.getpass()
         ProfX.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
-        ProfX.send(PW, quiet=True, readEcho=False)
+        if config.PW:
+            ProfX.send(config.PW, quiet=True, readEcho=False)
+            ProfX.tn.read_until(b"*"*len(config.PW)) #TelePath will echo the PW as *s
+        else:
+            PW = getpass.getpass()
+            ProfX.send(PW, quiet=True, readEcho=False)
+            ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s
         ProfX.tn.set_debuglevel(ProfX.DEBUGLEVEL) #Resume previous debugging level (if >0)
-        ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s
         #TODO: be able to work with errors!
         telnetLogger.debug("Connection to TelePath established. Attempting to read screen...")
         while (ProfX.screen.Type != "MainMenu"):
@@ -496,7 +504,8 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         if(TrainingSystem):
             ProfX.UseTrainingSystem = True
             telnetLogger.info("Connecting to training sub-system, for safe testing and development. Remember: Never test in production.")
-            ProfX.send('TRAIN')
+            #ProfX.send(config.LOCALISATION.TrainingSystem)
+            ProfX.send("TRAIN")
             ProfX.read_data()
 
     """
@@ -532,7 +541,6 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
     
     @staticmethod
     def send(message, quiet=False, readEcho=True, maxwait_ms=1000):
-        #TODO: implement timeout.
         try:
             message = str(message)
             ASCIImsg = message.encode("ASCII")+b'\x0D'
@@ -554,8 +562,7 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
 
     @staticmethod
     def disconnect():
-        telnetLogger.info("Preparing to disconnect...")
         ProfX.return_to_main_menu(ForceReturn=True)
-        telnetLogger.info("Disconnecting.")
+        telnetLogger.info("disconnect(): Disconnecting.")
         ProfX.send('', readEcho=False)
         ProfX.send_raw(b'\x04', readEcho=False)         
