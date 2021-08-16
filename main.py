@@ -35,8 +35,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
 
     logging.info("aot_stub_buster(): Full autofire.")
     ProfX.return_to_main_menu()
-    ProfX.send("SENQ", quiet=True)         # Go into Specimen Inquiry
-    #ProfX.send(config.LOCALISATION.SpecimenEnquiry, quiet=True)         # Go into Specimen Inquiry
+    ProfX.send(config.LOCALISATION.SPECIMENENQUIRY, quiet=True)         # Go into Specimen Inquiry
     ProfX.read_data()
     for AOTSample in AOTSamples: #TODO: issue here; loop likes to get same sample X times...
         ProfX.send(AOTSample.ID, quiet=True, maxwait_ms=2000)  #Open record
@@ -46,11 +45,11 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
         
         if TargetIndex == -1:
             logging.error(f"Cannot locate AOT set for patient {AOTSample.ID}. Please check code and.or retry.")
-            ProfX.send('') #Exit record
+            ProfX.send(config.LOCALISATION.EMPTYSTR) #Exit record
             continue
         if get_creators == True:
             logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
-            ProfX.send('H'+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
+            ProfX.send(config.LOCALISATION.SETHISTORY+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
             ProfX.read_data()
             if not ProfX.screen.hasErrors:
                 #locate line with 'Set requested by: '
@@ -58,17 +57,17 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
                     if line.find("Set requested by: ") != -1:
                         user = line[ line.find("Set requested by: ")+len("Set requested by: "): ].strip()
                         AOTStubs[ user ] += 1
-                ProfX.send('Q')
+                ProfX.send(config.LOCALISATION.QUIT)
                 ProfX.read_data()
 
         if(insert_NA_result == True):
             logging.info(f"aot_stub_buster(): Closing Set [AOT] (#{TargetIndex}) for Sample [{AOTSample.ID}]...")
-            ProfX.send('U'+str(TargetIndex), quiet=True)  #Open relevant test record
+            ProfX.send(config.LOCALISATION.UPDATE_SET_RESULT+str(TargetIndex), quiet=True)  #Open relevant test record
             ProfX.read_data()
             #TODO: Check screen type!
-            ProfX.send('NA')                              #Fill Record
+            ProfX.send(config.LOCALISATION.NA)                              #Fill Record
             ProfX.read_data()
-            ProfX.send('R', quiet=True)                   #Release NA Result
+            ProfX.send(config.LOCALISATION.RELEASE, quiet=True)                   #Release NA Result
             #TODO: Check if you get the comment of "Do you want to retain ranges"! Doesn't happen for AOT but...
             ProfX.read_data()
             #TODO: Error(?) in screen rendered seems to shift the IDLine, which 'should' be 'Direct result entry Request <XXX>'
@@ -194,8 +193,7 @@ def privilege_scan(userlist = None) -> None:
     logging.error("privilege_scan(): FUNCTION ISN'T DONE YET")
     
     #Enter administration area - needs privilege on TelePath user to access
-    ProfX.send("PRIVS")
-    #ProfX.send(config.LOCALISATION.Privileges) #requires Level 1 access, do *not* write data to this area to avoid messing up the system.
+    ProfX.send(config.LOCALISATION.PRIVILEGES) #requires Level 1 access, do *not* write data to this area to avoid messing up the system.
     ProfX.read_data()
     assert ProfX.screen.Type == "PRIVS"
 
@@ -206,7 +204,7 @@ def privilege_scan(userlist = None) -> None:
         #TODO: If querying an account that does not exist, the cursor goes to line... 6? (TODO:check it's line 6), to make a new account; abort via ProfX.send('^')
         if ProfX.screen.cursorPosition[0]<20:
             logging.info(f"privilege_scan(): User '{user}' does not appear to exist on the system.")
-            ProfX.send('^') #Return to main screen, ready for next
+            ProfX.send(config.LOCALISATION.CANCEL_ACTION) #Return to main screen, ready for next
             continue
         
         #If that isn't the case, grab results and parse

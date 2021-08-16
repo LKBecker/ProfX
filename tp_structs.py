@@ -277,25 +277,23 @@ class SampleID():
         return(f"SampleID(\"A,{self.Year}.{self.LabNumber}.{self.CheckChar}\")")
 
     def __gt__(self, other) -> bool:
-        assert isinstance(other, SampleID)
+        if not isinstance(other, SampleID):
+            raise TypeError(f"Cannot compare SampleID with {type(other)}")
         
         if self.Override or other.Override:
             return str(self) > str(other)
 
-        if self.Year > other.Year:
-            return True
-        if self.Year < other.Year:
-            return False
+        if self.Year != other.Year:
+            return self.Year > other.Year
 
-        if self.LabNumber > other.LabNumber:
-            return True
-        if self.LabNumber < other.LabNumber:
-            return False
+        if self.LabNumber != other.LabNumber:
+            return self.LabNumber > other.LabNumber
 
         return False
 
     def __eq__(self, other) -> bool:
-        assert isinstance(other, SampleID)
+        if not isinstance(other, SampleID):
+            raise TypeError(f"Cannot compare SampleID with {type(other)}")
 
         if self.Override or other.Override:
             return str(self) == str(other)
@@ -422,8 +420,7 @@ class Specimen():
     def get_chunks(self):
         dataLogger.debug("Specimen.get_chunks(): Returning to main menu.")
         ProfX.return_to_main_menu()
-        #ProfX.send(LOCALISATION.SpecimenEnquiry)
-        ProfX.send("SENQ")
+        ProfX.send(config.LOCALISATION.SPECIMENENQUIRY)
         ProfX.read_data()
         ProfX.send(self.ID)
         ProfX.read_data()
@@ -642,8 +639,7 @@ class Patient():
             dataLogger.error(f"Either Patient ID ({self.ID}) or First Name ({self.LName}) not sufficient to search for samples. Aborting.")
             return
         ProfX.return_to_main_menu()
-        #ProfX.send(config.LOCALISATION.PatientEnquiry)
-        ProfX.send("PENQ")
+        ProfX.send(config.LOCALISATION.PATIENTENQUIRY)
         ProfX.read_data()
         ProfX.send(self.ID)
         ProfX.read_data()
@@ -714,10 +710,9 @@ def load_sendaways_table(filePath = "S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKB
     return SAWAYS
 
 """Downloads lists of samples with one or more set(s) beyond their TAT from a named Section (default:AWAY). Optionally, filters for samples by Setcode"""
-def get_overdue_sets(Section:str="AWAY", SetCode:str=None, FilterSets:list=None) -> list:
+def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode:str=None, FilterSets:list=None) -> list:
     ProfX.return_to_main_menu()
-    #ProfX.send(config.LOCALISATION.SampleOverview, quiet=True)     # Navigate to outstanding sample list
-    ProfX.send("OVRW", quiet=True)
+    ProfX.send(config.LOCALISATION.OVERDUE_SAMPLES, quiet=True)     # Navigate to outstanding sample list
     ProfX.read_data()
     ProfX.send(Section)    # Section AUTOMATION
     ProfX.read_data()
@@ -824,8 +819,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         return
 
     ProfX.return_to_main_menu()
-    #ProfX.send(LOCALISATION.SpecimenEnquiry, quiet=True) #Move to specimen inquiry 
-    ProfX.send("SENQ", quiet=True)
+    ProfX.send(config.LOCALISATION.SPECIMENENQUIRY, quiet=True) #Move to specimen inquiry 
     ProfX.read_data()
     SampleCounter = 0
     nSamples = len(SampleObjs)
@@ -884,9 +878,9 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             
             if (GetFurther == True):
                 #Retrieve NHS Number and Clinical Details, which are not visible on main screen...
-                ProfX.send("F", quiet=True)
+                ProfX.send("F", quiet=True) #TODO: Don't hardcode this?
                 ProfX.read_data()
-                ProfX.send("1", quiet=True)
+                ProfX.send("1", quiet=True) #TODO: Don't hardcode this?
                 ProfX.read_data()
                 Sample.NHSNumber = Screen.chunk_or_none(ProfX.screen.ParsedANSI, line=17, column=37, highlighted=True)
                 
@@ -951,8 +945,7 @@ def get_recent_samples_of_set_type(Set:str, nSamples:int, FirstDate:datetime.dat
     raise NotImplementedError
     #TODO Finish
     ProfX.return_to_main_menu()
-    #ProfX.send(config.LOCALISATION.SpecimenEnquiry)
-    ProfX.send("SENQ")
+    ProfX.send(config.LOCALISATION.SPECIMENENQUIRY)
     ProfX.read_data()
     ProfX.send("U") #Engages search function
     ProfX.read_data()

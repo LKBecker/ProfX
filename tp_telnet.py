@@ -401,7 +401,7 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
     """ Contains methods and strutures to connect to, and exchange data with, the TelePath LIMS system """
     tn=telnetlib.Telnet()
     IP                  = config.LIMS_IP   # love 2 LAN
-    PORT                = 23                # technically pointless, but let's be precise
+    PORT                = config.LIMS_PORT # technically pointless, but let's be precise
     DEBUGLEVEL          = 0                 # value >0 will show (parts of) telnet traffic on-screen, this may include your password 
     #MAX_WINDOW_WIDTH    = 5000              # Max Value: 65535
     MAX_WINDOW_WIDTH    = 128              # Max Value: 65535
@@ -417,14 +417,18 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
     SCREEN_HISTORY_LENGTH = 10
    
     @staticmethod
-    def return_to_main_menu(ForceReturn=False):
+    def return_to_main_menu(ForceReturn:bool=False, MaxTries:int=10):
+        TryCounter = 0
         telnetLogger.debug("Returning to main menu...")
         TargetScreen = "MainMenu"
         if ProfX.UseTrainingSystem and not ForceReturn:
             TargetScreen = "MainMenu_Training"
-        while(ProfX.screen.Type != TargetScreen):
-            ProfX.send('^')
+        while(ProfX.screen.Type != TargetScreen and TryCounter <= MaxTries):
+            ProfX.send(config.LOCALISATION.CANCEL_ACTION)
             ProfX.read_data()
+            TryCounter = TryCounter+1
+        if TryCounter > MaxTries:
+            raise Exception(f"Could not reach main menu in {MaxTries} attempts. Check Screen.recognise_type() logic works correctly.")
 
     """ Handles TELNET option negotiation """
     @staticmethod
@@ -474,10 +478,10 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         telnetLogger.debug("Opening connection to TelePath...")
         ProfX.tn.open(ProfX.IP, ProfX.PORT, timeout=1)
         ProfX.tn.read_until(b"login: ")
-        ProfX.send("chm")
+        ProfX.send(config.LOCALISATION.IBM_USER)
         telnetLogger.debug("Connected to CHEMISTRY module. Waiting for login...")
         ProfX.tn.read_until(b'\x05')
-        ProfX.tn.write(b"PTERM:CHM\x0D")
+        ProfX.tn.write(config.LOCALISATION.ANSWERBACK)
         ProfX.tn.read_until(b"User ID :")
         if config.USER:
             ProfX.send(config.USER)
@@ -497,15 +501,14 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         ProfX.tn.set_debuglevel(ProfX.DEBUGLEVEL) #Resume previous debugging level (if >0)
         #TODO: be able to work with errors!
         telnetLogger.debug("Connection to TelePath established. Attempting to read screen...")
-        while (ProfX.screen.Type != "MainMenu"):
+        while (ProfX.screen.Type != "MainMenu"): #TODO: Localise?
             ProfX.read_data()
-            telnetLogger.debug(f"connect(): Screen type is {ProfX.screen.Type}")
+            telnetLogger.debug(f"connect(): Screen type is {ProfX.screen.Type}, first lines are {ProfX.screen.Lines[0:2]}")
             time.sleep(1) # Wait for ON-CALL? to go away
         if(TrainingSystem):
             ProfX.UseTrainingSystem = True
             telnetLogger.info("Connecting to training sub-system, for safe testing and development. Remember: Never test in production.")
-            #ProfX.send(config.LOCALISATION.TrainingSystem)
-            ProfX.send("TRAIN")
+            ProfX.send(config.LOCALISATION.TRAININGSYSTEM)
             ProfX.read_data()
 
     """

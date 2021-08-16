@@ -3,7 +3,7 @@ from tp_telnet import ProfX, Screen
 from tp_utils import process_whitespaced_table, extract_column_widths
 import time
 
-#import config
+import config
 
 import logging
 setRipperLogger = logging.getLogger(__name__)
@@ -158,8 +158,7 @@ def get_Set_definitions(Sets:list, reckless=False):
         return True
 
     ProfX.return_to_main_menu()
-    ProfX.send("SETM")
-    #ProfX.send(LOCALISATION.SetMaintenance)
+    ProfX.send(config.LOCALISATION.SETMAINTENANCE)
     ProfX.read_data()
     ProfX.send('A')
     ProfX.read_data()
@@ -167,7 +166,7 @@ def get_Set_definitions(Sets:list, reckless=False):
     for Set in Sets:
         AUCOM_Code = ""
         AuthGroup_Code = ""
-        ProfX.send(Set) # breaks here... works when debugging, stepping through SLOWLY
+        ProfX.send(Set) #TODO: breaks here... works when debugging, stepping through SLOWLY
         if not reckless: 
             time.sleep(1)   # Seems to take about 1 second to check for access and return error
         else: 
@@ -199,7 +198,7 @@ def get_Set_definitions(Sets:list, reckless=False):
         
         # TODO: Add additional capture logic?
         setRipperLogger.info(f"get_Set_definitions(): Retrieved Set {Set}: AUCOM {AuthGroup_Code}, SNPCL {AUCOM_Code}")
-        ProfX.send('^')
+        ProfX.send(config.LOCALISATION.CANCEL_ACTION)
         ProfX.read_data()
     setRipperLogger.info(f"get_Set_definitions(): Loop complete. Returning {len(SetDefinitions)} identifiers.")
     return SetDefinitions
@@ -215,8 +214,8 @@ def get_NPCL_Interventions(NPCL_Lists:list):
             NPCL_Lists = [NPCL_Lists]
     for NPCL_List in NPCL_Lists:
         ProfX.return_to_main_menu()
-        #ProfX.send(LOCALISATION.NPCLSettings)
-        ProfX.send("NPSET")
+        
+        ProfX.send(config.LOCALISATION.NPCLSETS)
         ProfX.read_data()
         setRipperLogger.info(f"Retrieving auto-Authorization Interventions for NPCL list '{NPCL_List.AuthCode}'...")
         ProfX.send(NPCL_List.AuthCode)
@@ -278,8 +277,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
                 Page_Has_Blanks = True 
 
     ProfX.return_to_main_menu()
-    #ProfX.send(LOCALISATION.SNPCLSettings)
-    ProfX.send("SNPCL")
+    ProfX.send(config.LOCALISATION.SNPCL)
     ProfX.read_data()
     
     for SNPCLList in SNPCLLists:
@@ -300,10 +298,9 @@ def get_authorisation_group_structure(SNPCLLists:set):
 
         if (ProfX.screen.Lines[4].strip() != "Auth code"):  # Set does not exist and we entered creation mode
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} does not appear to exist. This shouldn't happen if fed from set_ripper().")
-            ProfX.send('^')        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
+            ProfX.send(config.LOCALISATION.CANCEL_ACTION)        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
             ProfX.read_data()
-            #ProfX.send(LOCALISATION.SNPCLSettings)    # So we just need to return...
-            ProfX.send("SNPCL")
+            ProfX.send(config.LOCALISATION.SNPCL)
             ProfX.read_data()
             continue
 
@@ -337,8 +334,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
 def get_autocomment_structure(AUCOMSets:set):
     AUCOM_Data = []
     ProfX.return_to_main_menu()
-    #ProfX.send(LOCALISATION.AutoComments)
-    ProfX.send("AUCOM")
+    ProfX.send(config.LOCALISATION.AUTOCOMMENTS)
     ProfX.read_data()                  
     for AUCOM_Routine in AUCOMSets:
         if not AUCOM_Routine:
