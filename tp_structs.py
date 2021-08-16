@@ -49,7 +49,7 @@ class PatientContainer():
         self.Patients[key] = item
 
     def has_patient(self, PatientID):
-        if type(PatientID) is "Patient":
+        if type(PatientID)=="Patient":
             PatientID = str(Patient)
         if PatientID in self.Patients.keys() : return True
         return False
@@ -694,7 +694,7 @@ class ReferralLab():
 
 
 """ Loads data from Sendaways_Database.tsv, and parses into ReferralLab() instances. Assumes consistent, tab-separated data."""
-def load_sendaways_table(filePath = "S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/Sendaways_Database.tsv"):
+def load_sendaways_table(filePath = "./Sendaways_Database.tsv"):
     if not(os.path.exists(filePath)): raise FileNotFoundError("File '%s' does not appear to exist" % filePath)
     SAWAYS = []
     SAWAY_IO = open(filePath).readlines()
@@ -960,7 +960,7 @@ def get_recent_samples_of_set_type(Set:str, nSamples:int, FirstDate:datetime.dat
     pass
 
 """ Loads simple text file and transforms it into a list of ReferenceRange objects"""
-def load_reference_ranges(filePath="S:/CS-PATHOLOGY/BIOCHEMISTRY/Z Personal/LKBecker/STP/Limits.txt"):
+def load_reference_ranges(filePath="./Limits.txt"):
     RefRanges = []
     if not os.path.isfile(filePath):
         raise IOError

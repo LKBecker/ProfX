@@ -25,7 +25,7 @@ class SetDefinition():
         return f"SetDefinition(SetCode={self.Code}, AuthorisationGroup={self.AuthGroup}, AutoCommentGroup={self.AutoCommGroup})"
 
     def file_dump(self):
-        with open(f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/SetData/{self.Code}.txt", "w") as Output:
+        with open(f"./SetData/{self.Code}.txt", "w") as Output:
             Output.write(f"Begin Set '{self.Code}'\n")
             Output.write(f"Extracted {datetime.datetime.now().ctime()}\n\n")
             Output.write(f"{self.Code} is a member of Authorization group '{self.AuthGroup}'\n")
@@ -437,7 +437,7 @@ def set_ripper(SetsToRip, reckless=True):
         if( SetObjCounter % ReportInterval == 0): setRipperLogger.info("Collated %d of %d SetObjs (%.2f%%)."% (SetObjCounter, nSamples, Pct))
     setRipperLogger.info("set_ripper(): Complete.")
 
-SetsIO = open("S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/SetsToExtract.txt", "r")
+SetsIO = open("./SetsToExtract.txt", "r")
 SetsToRip = SetsIO.readlines()
 SetsIO.close()
 SetsToRip = [x.strip() for x in SetsToRip]

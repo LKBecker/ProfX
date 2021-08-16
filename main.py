@@ -77,7 +77,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
     #for AOTSample
 
     if get_creators==True:
-        with open(f'S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/AOTCreators_{timestamp(fileFormat=True)}.log', 'w') as AOTData:
+        with open(f'./AOTCreators_{timestamp(fileFormat=True)}.log', 'w') as AOTData:
             AOTData.write(f"AOT sets, created {timestamp()}\n")
             AOTData.write("User\tNumber of AOT Stubs\n")
             for key, value in AOTStubs.most_common():
@@ -93,7 +93,7 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
         SAWAY_DB = tp_structs.load_sendaways_table()
         # For each sample, retrieve details: Patient FNAME LNAME DOB    
         tp_structs.complete_specimen_data_in_obj(OverdueSAWAYs, GetNotepad=True, GetComments=True, GetFurther=True, ValidateSamples=False, FillSets=False)
-        outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_SawayData.txt"
+        outFile = f"./{timestamp(fileFormat=True)}_SawayData.txt"
         SAWAY_Counters = range(0, len(OverdueSAWAYs))
         logging.info("sendaways_scan(): Beginning to write overdue sendaways to file...")
         with open(outFile, 'w') as SAWAYS_OUT:
@@ -186,7 +186,7 @@ def privilege_scan(userlist = None) -> None:
     
     #Gather employee names OR read from file
     if not userlist:
-        ul_file = open('S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/PrivCheck.txt', 'r')
+        ul_file = open('./PrivCheck.txt', 'r')
         userlist = ul_file.readlines()
         userlist = [x.trim() for x in userlist]
     
@@ -217,7 +217,7 @@ def privilege_scan(userlist = None) -> None:
         ProfX.send('A') #Return to admin area, by Accepting the current settings without having changed a thing
     
     logging.info("privilege_scan(): Writing to output file.")
-    outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_PrivScan.txt"
+    outFile = f"./{timestamp(fileFormat=True)}_PrivScan.txt"
     with open(outFile, 'w') as out:
         for line in UserPrivs:
             out.write(line)
@@ -232,13 +232,13 @@ def patient_download(FilterSets:list=None):
 def mass_download(Samples:list=None, FilterSets:list=None):
     if not Samples:
         logging.info("mass_download(): No samples supplied, loading from file")
-        with open("S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/ToRetrieve.txt", 'r') as DATA_IN:
+        with open("./ToRetrieve.txt", 'r') as DATA_IN:
             Samples = DATA_IN.readlines()
         Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
     logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
     tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=True, GetComments=True)
     logging.info("mass_download(): Writing data to file.")
-    outFile = f"S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/{timestamp(fileFormat=True)}_TPDownload.txt"
+    outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
     with open(outFile, 'w') as DATA_OUT:
         DATA_OUT.write("SampleID\tRequested On\tSet\tStatus\tResult(s)\tComments\n")
         for sample in Samples:
@@ -282,7 +282,7 @@ def visualise(Sample:str, FilterSets:list=None, nMaxSamples:int=10):
         tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False)
     Patient.create_plot(FilterAnalytes=FilterSets)
 
-logging.basicConfig(filename='S:/CS-Pathology/BIOCHEMISTRY/Z Personal/LKBecker/Code/Python/TelePath_Connect/debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
+logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter(LOGFORMAT))
