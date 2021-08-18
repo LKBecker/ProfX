@@ -116,8 +116,8 @@ class SetResult():
 """Contains a (set of) test(s), any result(s), and any comment(s) for that test"""
 class TestSet():
     def __init__(self, Sample:str, SetIndex:str, SetCode:str, AuthedOn:str=None, AuthedBy:str=None, Status:str=None, 
-                 Results:list=None, Comments:list=None, RequestedOn:str=None, TimeOverdue:str=None, OverrideID:bool=False):
-        self.Sample     = SampleID(Sample, OverrideID)
+                 Results:list=None, Comments:list=None, RequestedOn:str=None, TimeOverdue:str=None, Override:bool=False):
+        self.Sample     = SampleID(Sample, Override)
         self.Index      = SetIndex
         self.Code       = SetCode
         self.Status     = Status
@@ -179,23 +179,24 @@ class TestSet():
         pass
 
 
-""" Contains de-and encoding for Sample IDs (barcoded) and enables ability to sort them"""
+""" Contains de-and encoding for Sample IDs (barcoded) and enables ability to sort them.
+    By default, implements a Offset 23-based system in use at a local trust; set Override to True to disable these default checks."""
 class SampleID():
     CHECK_INT = 23
     CHECK_LETTERS = ['B', 'W', 'D', 'F', 'G', 'K', 'Q', 'V', 'Y', 'X', 'A', 'S', 'T', 'N', 'J', 'H', 'R', 'P', 'L', 'C', 'Z', 'M', 'E']
 
     def __init__(self, IDStr, Override = False):
-        #Prefix, Date Part, Number Part, Check Char
-        self.Prefix = "A,"
-        self.Year = None
-        self.LabNumber = None
-        self.CheckChar = None
         self.Override = Override
-        self.AsText = ""
-
-        if Override:
+        if self.Override:
             self.AsText = IDStr
             return
+
+        #Prefix, Date Part, Number Part, Check Char
+        self.Prefix     = "A,"
+        self.Year       = None
+        self.LabNumber  = None
+        self.CheckChar  = None
+        self.AsText     = ""
 
         IDStr = IDStr.upper()
         if IDStr[1]==",":
@@ -316,7 +317,7 @@ class SampleID():
         assert self.CheckChar
 
         if self.Override:
-            return False
+            return config.LOCALISATION.check_sample_id(self.AsText)
 
         sID = str(self).replace(".", "")
         if (len(sID)!=10):
@@ -342,14 +343,14 @@ class SampleID():
 
 """Contains data describing a patient sample, including demographics of the patient, and Specimen Notepad"""
 class Specimen():
-    def __init__(self, SpecimenID:str, OverrideID:bool=False):
-        self._ID                = SampleID(SpecimenID, OverrideID)
+    def __init__(self, SpecimenID:str, Override:bool=False):
+        self._ID                = SampleID(SpecimenID, Override)
         self.PatientID          = None
         self.LName              = None
         self.FName              = None 
         self.DOB                = None
-        self.ClinDetails        = None  #TODO: Get, via F 4 ProfX.read_data() Q
-        self.Collected            = None 
+        self.ClinDetails        = None
+        self.Collected          = None 
         self.Received           = None
         self.Sets               = []
         self.NotepadEntries     = []
@@ -781,7 +782,6 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         SetAuthTime = "[Not Authorized]"
         SetRepTime = "[Not Reported]"
 
-        #TODO: Get set status. No point looking for line 21 if it's released!
         SetIsAuthed = False
         if SetToGet.Status:
             if SetToGet.Status[0]=="R":
@@ -878,9 +878,9 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             
             if (GetFurther == True):
                 #Retrieve NHS Number and Clinical Details, which are not visible on main screen...
-                ProfX.send("F", quiet=True) #TODO: Don't hardcode this?
+                ProfX.send("F", quiet=True)
                 ProfX.read_data()
-                ProfX.send("1", quiet=True) #TODO: Don't hardcode this?
+                ProfX.send("1", quiet=True)
                 ProfX.read_data()
                 Sample.NHSNumber = Screen.chunk_or_none(ProfX.screen.ParsedANSI, line=17, column=37, highlighted=True)
                 
@@ -941,7 +941,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     dataLogger.info("complete_specimen_data_in_obj(): All downloads complete.")
 
 """ Supposed to retrieve the most recent n samples with a specified set, via SENQ"""
-def get_recent_samples_of_set_type(Set:str, nSamples:int, FirstDate:datetime.datetime) -> list:
+def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime, LastDate:datetime.datetime=datetime.datetime.now(), nSamples:int=10) -> list:
     raise NotImplementedError
     #TODO Finish
     ProfX.return_to_main_menu()
@@ -956,7 +956,6 @@ def get_recent_samples_of_set_type(Set:str, nSamples:int, FirstDate:datetime.dat
     #read in page, parse sample(s) (get result(s))
     #change page?
     #extract again
-
     pass
 
 """ Loads simple text file and transforms it into a list of ReferenceRange objects"""

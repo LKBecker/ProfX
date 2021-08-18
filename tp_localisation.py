@@ -22,6 +22,16 @@ class Commands:
     RELEASE: str
     EMPTYSTR: str
     QUIT: str
+    check_main_screen: function
+    check_sample_id: function
+
+def default_check_main_screen(Lines:list):
+    if (Lines[2]=="MainScreen"):
+        return True
+    return False
+
+def default_check_sample_id(SampleID:str):
+    return True
 
 DEFAULT = Commands(
     IBM_USER="TP",
@@ -43,5 +53,7 @@ DEFAULT = Commands(
     NA="NA",
     RELEASE="R",
     EMPTYSTR="",
-    CANCEL_ACTION="^"
+    CANCEL_ACTION="^",
+    check_main_screen=default_check_main_screen,
+    check_sample_id=default_check_sample_id
 )

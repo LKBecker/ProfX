@@ -296,12 +296,16 @@ class Screen():
             self.Type ="PENQ"
         elif IDLine == "ON-CALL?": 
             self.Type = "ONCALL_PreMenu"
-        
+
+        if config.LOCALISATION.check_main_screen(self.Lines):
+            self.Type= "MainMenu"
+
         #Some ID lines have variable components. We could use regex to parse them, but here, we just parse the static bits
         if self.Type == "UNKNOWN" and len(IDLineSplit)>=2:
-            if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
-                self.Type = "MainMenu"
-            elif IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
+            #if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
+            #    self.Type = "MainMenu"
+            #elif IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
+            if IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
                 self.Type = "MainMenu_Training"
             elif IDLineSplit[0] == "Request:": 
                 self.Type = "ResultEntry/Auth"

@@ -196,7 +196,6 @@ def get_Set_definitions(Sets:list, reckless=False):
 
         SetDefinitions.append(SetDefinition(SetCode=Set, AuthorisationGroup=AuthGroup_Code, AutoCommentGroup=AUCOM_Code, AccessedSuccessfully=True))
         
-        # TODO: Add additional capture logic?
         setRipperLogger.info(f"get_Set_definitions(): Retrieved Set {Set}: AUCOM {AuthGroup_Code}, SNPCL {AUCOM_Code}")
         ProfX.send(config.LOCALISATION.CANCEL_ACTION)
         ProfX.read_data()
@@ -350,7 +349,6 @@ def get_autocomment_structure(AUCOMSets:set):
                 continue
         else:
             AUCOM_Chunks = [x for x in ProfX.screen.ParsedANSI if x.line == 3 and x.deleteMode == 0]
-            #TODO: Are relevant chunks only ever on line 3? Check w/ other AUCOM routines.
             if AUCOM_Chunks:
                 AUCOM_Chunks = AUCOM_Chunks[1:] # First line is a header which we would like to ignore
                 try:
@@ -377,7 +375,6 @@ def get_autocomment_structure(AUCOMSets:set):
                         Autocomment_Obj.Pages.append(tmpACP)    # Creates data structure and appends to AutoCommentStructure container
                         ProfX.send('A')    # (A)ccept, goes back to root for next index
                         ProfX.read_data()
-                    #TODO: Final comm's line is missing?
                 except AssertionError:
                     setRipperLogger.debug(f"get_autocomment_structure(): '{AUCOM_Routine}' returns uneven number of AUCOM_Chunks. Adding 'None' and continuing.")
             else: 
@@ -412,7 +409,7 @@ def set_ripper(SetsToRip, reckless=True):
         get_NPCL_Interventions(SNPCL_Objs)
     if AUCOMs:
         setRipperLogger.info(f"set_ripper(): Retrieving Autocomment logics for {len(AUCOMs)} autocomment sets.")
-        AUCOM_Objs = get_autocomment_structure(AUCOMs) # TODO: "Could not identify screen 'A'" ?  
+        AUCOM_Objs = get_autocomment_structure(AUCOMs)
     
     setRipperLogger.info("set_ripper(): Data collection complete. Collating...")
     #Assemble / collate into 'long form'
