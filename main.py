@@ -27,13 +27,11 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
     logging.info(f"aot_stub_buster(): Start up. Gathering history: {get_creators}. NAing entries: {insert_NA_result}.")
     AOTSamples = tp_structs.get_overdue_sets("AUTO", "AOT")
     AOTStubs = Counter()
-    logging.info(f"aot_stub_buster(): There are {len(AOTSamples)} samples with an overdue AOT.")
     
     if (insert_NA_result == False and get_creators == False):
         logging.info("aot_stub_buster() complete.")
         return
 
-    logging.info("aot_stub_buster(): Full autofire.")
     ProfX.return_to_main_menu()
     ProfX.send(config.LOCALISATION.SPECIMENENQUIRY, quiet=True)         # Go into Specimen Inquiry
     ProfX.read_data()
@@ -48,7 +46,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             ProfX.send(config.LOCALISATION.EMPTYSTR) #Exit record
             continue
         if get_creators == True:
-            logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
+            #logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
             ProfX.send(config.LOCALISATION.SETHISTORY+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
             ProfX.read_data()
             if not ProfX.screen.hasErrors:
@@ -56,10 +54,14 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
                 for line in ProfX.screen.Lines[6].split("\r\n"):
                     if line.find("Set requested by: ") != -1:
                         user = line[ line.find("Set requested by: ")+len("Set requested by: "): ].strip()
+                        creationDT  = line[0:16].strip()
+                        logging.info(f"aot_stub_buster(): Open set [AOT] of sample [{AOTSample.ID}] was created by [{user}] at {creationDT}.")
                         AOTStubs[ user ] += 1
                 ProfX.send(config.LOCALISATION.QUIT)
                 ProfX.read_data()
-
+            else:
+                logging.info(f"aot_stub_buster(): Could not retrieve history for [AOT] of sample [{AOTSample.ID}].")
+        
         if(insert_NA_result == True):
             logging.info(f"aot_stub_buster(): Closing Set [AOT] (#{TargetIndex}) for Sample [{AOTSample.ID}]...")
             ProfX.send(config.LOCALISATION.UPDATE_SET_RESULT+str(TargetIndex), quiet=True)  #Open relevant test record
@@ -236,34 +238,35 @@ def mass_download(Samples:list=None, FilterSets:list=None):
             Samples = DATA_IN.readlines()
         Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
     logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
-    tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=True, GetComments=True)
+    tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
     logging.info("mass_download(): Writing data to file.")
     outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
     with open(outFile, 'w') as DATA_OUT:
-        DATA_OUT.write("SampleID\tRequested On\tSet\tStatus\tResult(s)\tComments\n")
+        DATA_OUT.write("SampleID\tCollectionDate\tCollectionTime\tReceivedDate\tReceivedTime\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
         for sample in Samples:
+            OutStr = sample.ID + "\t"
             if sample.Sets:
-                date = None
                 if sample.Collected:
-                    date = sample.Collected.strftime("%d/%m/%Y %H:%M")
-                if sample.Received and not date:
-                    date = sample.Received.strftime("%d/%m/%Y %H:%M")
+                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M")
+                else:
+                    OutStr = OutStr + "NA\tNA"
+
+                if sample.Received:
+                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M")
+                else:
+                    OutStr = OutStr + "NA\tNA"
 
                 for _set in sample.Sets:
                     if FilterSets:
                         if _set.Code not in FilterSets: 
                             continue
-                    if _set.RequestedOn and not date:
-                        date = _set.RequestedOn.strftime("%d/%m/%Y %H:%M")
-                    if not date:
-                        date = "Unknown"
                     if _set.Results:
                         for _result in _set.Results:
                             ComStr = ' '.join(_set.Comments)
-                            DATA_OUT.write(f"{sample.ID}\t{date}\t{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n")
+                            DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
                     if sample.hasNotepadEntries == True:
                         NPadStr = "%s\t" % ("|".join([str(x) for x in sample.NotepadEntries]))
-                        DATA_OUT.write(f"{sample.ID}\t{date}\tSpecimen Notepad\t\t{NPadStr}\n")
+                        DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
     logging.info("mass_download(): Complete.")
 
 """ Experimental graph producer. Not working currently. """
@@ -292,12 +295,12 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()#TrainingSystem=True)
-    aot_stub_buster()
-    #aot_stub_buster(insert_NA_result=True, get_creators=True)
+    #aot_stub_buster()
+    aot_stub_buster(insert_NA_result=True, get_creators=True)
     sendaways_scan()
-    #endaways_scan(getDetailledData=True)
-    #mass_download()
-    visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
+    #sendaways_scan(getDetailledData=True)
+    #mass_download(FilterSets=["ELAST"])
+    #visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
 
 except Exception as e: 
     logging.error(e)

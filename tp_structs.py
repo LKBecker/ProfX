@@ -98,12 +98,12 @@ class SetResult():
         self.SampleTaken = datetime_or_none(SampleTaken, "%d.%m.%y %H:%M")
         
     def __str__(self):
-        ResStr = f"{self.Analyte}: {self.Value} {self.Units}"
-        if self.SampleTaken:
-            if isinstance(self.SampleTaken, datetime.datetime):
-                ResStr = ResStr + f"(Sample taken: {self.SampleTaken.strftime('%y-%m-%d %H:%M')})"
+        ResStr = f"{self.Analyte}\t{self.Value}\t{self.Units}"
+        #if self.SampleTaken:
+        #    if isinstance(self.SampleTaken, datetime.datetime):
+        #        ResStr = ResStr + f" (Sample taken: {self.SampleTaken.strftime('%y-%m-%d %H:%M')})"
         if self.Flags:
-            ResStr = ResStr + f" [{self.Flags}]"
+            ResStr = ResStr + f"\t[{self.Flags}]"
         return ResStr
 
     def __repr__(self):
