@@ -1,14 +1,14 @@
 ﻿#GPL-3.0-or-later
+
 """#TODO:
     telePath_telnet
         Update recognizeScreen() to also check whether data field(s) are filled in -> SpecEnquiry_Blank / SpecEnquiry_Filled; Notepad_Blank/ Notepad_Patient/ Notepad_Entry;   
     telePath_data
-        Update Specimen parsing (check for highlighted chunks if not on the training system; on training system... idk, pray?)
         Specimen.WriteToFile and possibly TestSet.WriteToFile function(s)
         Extend Specimen() with matplotlib graphing function, or data dump (table format) -> hook into WriteToFile.
     main
         command line arg parser lol"""
-VERSION = "1.6.5"
+VERSION = "1.7.0"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
 #import argparse
@@ -20,7 +20,6 @@ from tp_telnet import ProfX
 from tp_utils import process_whitespaced_table, timestamp
 from collections import Counter
 import time
-
 
 """ Locates samples with AOT beyond TAT (...i.e. any), and marks the AOT as 'NA' if insert_NA_result is set to True """
 def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> None:
@@ -238,6 +237,8 @@ def mass_download(Samples:list=None, FilterSets:list=None):
             Samples = DATA_IN.readlines()
         Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
     logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
+    if isinstance(Samples[0], str):
+        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
     tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
     logging.info("mass_download(): Writing data to file.")
     outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
@@ -247,14 +248,14 @@ def mass_download(Samples:list=None, FilterSets:list=None):
             OutStr = sample.ID + "\t"
             if sample.Sets:
                 if sample.Collected:
-                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M")
+                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M") + "\t"
                 else:
-                    OutStr = OutStr + "NA\tNA"
+                    OutStr = OutStr + "NA\tNA\t"
 
                 if sample.Received:
-                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M")
+                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M") + "\t"
                 else:
-                    OutStr = OutStr + "NA\tNA"
+                    OutStr = OutStr + "NA\tNA\t"
 
                 for _set in sample.Sets:
                     if FilterSets:
@@ -263,7 +264,7 @@ def mass_download(Samples:list=None, FilterSets:list=None):
                     if _set.Results:
                         for _result in _set.Results:
                             ComStr = ' '.join(_set.Comments)
-                            DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
+                            DATA_OUT.write(f"{OutStr}{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
                     if sample.hasNotepadEntries == True:
                         NPadStr = "%s\t" % ("|".join([str(x) for x in sample.NotepadEntries]))
                         DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
@@ -296,10 +297,12 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 try:
     ProfX.connect()#TrainingSystem=True)
     #aot_stub_buster()
-    aot_stub_buster(insert_NA_result=True, get_creators=True)
-    sendaways_scan()
+    #aot_stub_buster(insert_NA_result=False, get_creators=True)
+    #sendaways_scan()
     #sendaways_scan(getDetailledData=True)
-    #mass_download(FilterSets=["ELAST"])
+    recentSamples = tp_structs.get_recent_samples_of_set_type("FCAL")
+    mass_download(recentSamples, FilterSets=["FCAL"])
+    #mass_download()
     #visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
 
 except Exception as e: 

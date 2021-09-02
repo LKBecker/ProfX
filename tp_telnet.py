@@ -312,6 +312,9 @@ class Screen():
                 self.Type = "ResultEntry/Auth"
             elif " ".join(IDLineSplit[:5]) == "Authorisation group rule definition for": 
                 self.Type = "SNPCL_Set"
+
+            elif " ".join(IDLineSplit[:3]) == "Unknown specimen search": 
+                self.Type = "SpecimenSearch"
         
         if self.Type == "UNKNOWN": telnetLogger.warning("Could not identify screen '%s'" % IDLine)
         telnetLogger.debug("Screen type is <%s>" % (self.Type))
