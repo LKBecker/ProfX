@@ -98,12 +98,12 @@ class SetResult():
         self.SampleTaken = datetime_or_none(SampleTaken, "%d.%m.%y %H:%M")
         
     def __str__(self):
-        ResStr = f"{self.Analyte}: {self.Value} {self.Units}"
-        if self.SampleTaken:
-            if isinstance(self.SampleTaken, datetime.datetime):
-                ResStr = ResStr + f"(Sample taken: {self.SampleTaken.strftime('%y-%m-%d %H:%M')})"
+        ResStr = f"{self.Analyte}\t{self.Value}\t{self.Units}"
+        #if self.SampleTaken:
+        #    if isinstance(self.SampleTaken, datetime.datetime):
+        #        ResStr = ResStr + f" (Sample taken: {self.SampleTaken.strftime('%y-%m-%d %H:%M')})"
         if self.Flags:
-            ResStr = ResStr + f" [{self.Flags}]"
+            ResStr = ResStr + f"\t[{self.Flags}]"
         return ResStr
 
     def __repr__(self):
@@ -515,11 +515,6 @@ class Specimen():
     
     def validate_ID(self) -> bool: return self._ID.validate()
     
-    def get_recent_results(self, nMaxSample:int=20):
-        raise NotImplementedError("FUNCTION ISN'T DONE YET SORRY")
-        #...Just do it via the PATIENT object?
-
-
 """Contains data pertaining to a patient. PII-heavy, DO NOT EXPORT"""
 class Patient():
     def __init__(self, ID):
@@ -941,22 +936,51 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     dataLogger.info("complete_specimen_data_in_obj(): All downloads complete.")
 
 """ Supposed to retrieve the most recent n samples with a specified set, via SENQ"""
-def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime, LastDate:datetime.datetime=datetime.datetime.now(), nSamples:int=10) -> list:
-    raise NotImplementedError
-    #TODO Finish
+def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, LastDate:datetime.datetime=None, nMaxSamples:int=50) -> list:
+    dataLogger.info(f"get_recent_samples_of_set_type(): Starting search for [{Set}] samples.")
     ProfX.return_to_main_menu()
     ProfX.send(config.LOCALISATION.SPECIMENENQUIRY)
     ProfX.read_data()
     ProfX.send("U") #Engages search function
     ProfX.read_data()
-    #Submit FirstDate or ENTER, handle error
-    #Submit SecondDate or ENTER, handle error
-    #Submit Set,handle error
-    #Submit enter enter enter
-    #read in page, parse sample(s) (get result(s))
-    #change page?
-    #extract again
-    pass
+    if FirstDate:
+        ProfX.send(FirstDate.strftime("DD.MM.YY"))
+    else:
+        ProfX.send("")
+    ProfX.read_data()
+    #TODO: handle errors
+
+    if LastDate:
+        ProfX.send(LastDate.strftime("DD.MM.YY"))
+    else:
+        ProfX.send("")
+    ProfX.read_data()
+    #TODO: handle errors
+
+    ProfX.send(Set)
+    ProfX.read_data()
+
+    ProfX.send("") # Skip location
+    ProfX.send("") # Skip GP
+    ProfX.send("") # Skip consultant
+    ProfX.read_data() # TODO: why is everything in ONE LINE
+    dataLogger.info(f"get_recent_samples_of_set_type(): Loading samples...")
+    fixLines = ProfX.screen.Lines[1].split("\r\n")
+    fixLines = [x for x in fixLines if x]
+    col_widths = extract_column_widths(fixLines[1])
+    samples = []
+    while (ProfX.screen.DefaultOption == "N") and (len(samples) < nMaxSamples):
+        _samples = process_whitespaced_table(fixLines[2:], col_widths)
+        for x in _samples:
+            samples.append("".join(x[1:3]))
+        ProfX.send(ProfX.screen.DefaultOption)
+        ProfX.read_data()
+        fixLines = ProfX.screen.Lines[1].split("\r\n")
+        fixLines = [x for x in fixLines if x]
+    dataLogger.info(f"get_recent_samples_of_set_type(): Search complete. {len(samples)} samples found.")
+    if len(samples) > nMaxSamples:
+        return samples[:nMaxSamples]
+    return samples
 
 """ Loads simple text file and transforms it into a list of ReferenceRange objects"""
 def load_reference_ranges(filePath="./Limits.txt"):

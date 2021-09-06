@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Callable
 
 @dataclasses.dataclass
 class Commands:
@@ -22,15 +23,18 @@ class Commands:
     RELEASE: str
     EMPTYSTR: str
     QUIT: str
-    check_main_screen: function
-    check_sample_id: function
+    check_main_screen: Callable
+    check_sample_id: Callable
 
 def default_check_main_screen(Lines:list):
-    if (Lines[2]=="MainScreen"):
+    IDLine = Lines[1].strip()
+    IDLineSplit = IDLine.split(" ")
+    if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
         return True
     return False
 
 def default_check_sample_id(SampleID:str):
+    
     return True
 
 DEFAULT = Commands(

@@ -20,6 +20,9 @@ class TelePathData():
     def parse_ansi(self):
         ANSIChunks          = []
         workingText         = self.raw.decode("ASCII")  #Consider decoding later, to keep \r\n as single bytes?
+        if workingText == "\x05":
+            ProfX.send(config.LOCALISATION.ANSWERBACK)
+            return
         #workingText         = workingText.replace("\r\n", "\n") #Does this change line length, and mess up inserts / string surgery when removed?
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
@@ -297,20 +300,24 @@ class Screen():
         elif IDLine == "ON-CALL?": 
             self.Type = "ONCALL_PreMenu"
 
-        if config.LOCALISATION.check_main_screen(self.Lines):
+        Local_Main_Menu = config.LOCALISATION.check_main_screen(self.Lines)
+        if Local_Main_Menu:
             self.Type= "MainMenu"
 
         #Some ID lines have variable components. We could use regex to parse them, but here, we just parse the static bits
         if self.Type == "UNKNOWN" and len(IDLineSplit)>=2:
-            #if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
-            #    self.Type = "MainMenu"
-            #elif IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
-            if IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
+            if IDLineSplit[-2] == "[CHM]" and IDLineSplit[0]=="Line": 
+                self.Type = "MainMenu"
+            elif IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
+            #if IDLineSplit[-2] == "[CHT]" and IDLineSplit[0]=="Line": 
                 self.Type = "MainMenu_Training"
             elif IDLineSplit[0] == "Request:": 
                 self.Type = "ResultEntry/Auth"
             elif " ".join(IDLineSplit[:5]) == "Authorisation group rule definition for": 
                 self.Type = "SNPCL_Set"
+
+            elif " ".join(IDLineSplit[:3]) == "Unknown specimen search": 
+                self.Type = "SpecimenSearch"
         
         if self.Type == "UNKNOWN": telnetLogger.warning("Could not identify screen '%s'" % IDLine)
         telnetLogger.debug("Screen type is <%s>" % (self.Type))
@@ -504,7 +511,7 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
             ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s
         ProfX.tn.set_debuglevel(ProfX.DEBUGLEVEL) #Resume previous debugging level (if >0)
         #TODO: be able to work with errors!
-        telnetLogger.debug("Connection to TelePath established. Attempting to read screen...")
+        telnetLogger.info("Connected to TelePath. Reading first screen...")
         while (ProfX.screen.Type != "MainMenu"): #TODO: Localise?
             ProfX.read_data()
             telnetLogger.debug(f"connect(): Screen type is {ProfX.screen.Type}, first lines are {ProfX.screen.Lines[0:2]}")

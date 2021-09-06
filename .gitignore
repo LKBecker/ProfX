@@ -7,4 +7,5 @@
 *.pyc
 *.xlsx
 config.py
+config_apex.py
 tests.py
