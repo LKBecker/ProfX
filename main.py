@@ -296,13 +296,12 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()#TrainingSystem=True)
-    #aot_stub_buster()
+    aot_stub_buster()
     #aot_stub_buster(insert_NA_result=False, get_creators=True)
-    #sendaways_scan()
+    sendaways_scan()
     #sendaways_scan(getDetailledData=True)
-    recentSamples = tp_structs.get_recent_samples_of_set_type("FCAL")
-    mass_download(recentSamples, FilterSets=["FCAL"])
-    #mass_download()
+    #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100)
+    #mass_download(recentSamples, FilterSets=["ELAST"])
     #visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
 
 except Exception as e: 

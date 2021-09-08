@@ -20,6 +20,9 @@ class TelePathData():
     def parse_ansi(self):
         ANSIChunks          = []
         workingText         = self.raw.decode("ASCII")  #Consider decoding later, to keep \r\n as single bytes?
+        if workingText == "\x05":
+            ProfX.send(config.LOCALISATION.ANSWERBACK)
+            return
         #workingText         = workingText.replace("\r\n", "\n") #Does this change line length, and mess up inserts / string surgery when removed?
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
@@ -508,7 +511,7 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
             ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s
         ProfX.tn.set_debuglevel(ProfX.DEBUGLEVEL) #Resume previous debugging level (if >0)
         #TODO: be able to work with errors!
-        telnetLogger.debug("Connection to TelePath established. Attempting to read screen...")
+        telnetLogger.info("Connected to TelePath. Reading first screen...")
         while (ProfX.screen.Type != "MainMenu"): #TODO: Localise?
             ProfX.read_data()
             telnetLogger.debug(f"connect(): Screen type is {ProfX.screen.Type}, first lines are {ProfX.screen.Lines[0:2]}")
