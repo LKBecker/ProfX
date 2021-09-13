@@ -228,19 +228,8 @@ def privilege_scan(userlist = None) -> None:
 def patient_download(FilterSets:list=None):
     pass
 
-""" Retrieves assay results for a list of Specimens.
-    FilterSets: A list of strings, designating which """
-def mass_download(Samples:list=None, FilterSets:list=None):
-    if not Samples:
-        logging.info("mass_download(): No samples supplied, loading from file")
-        with open("./ToRetrieve.txt", 'r') as DATA_IN:
-            Samples = DATA_IN.readlines()
-        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
-    logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
-    if isinstance(Samples[0], str):
-        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
-    tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
-    logging.info("mass_download(): Writing data to file.")
+def samples_to_file(Samples:list, FilterSets = None):
+    logging.info("samples_to_file(): Writing data to file.")
     outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
     with open(outFile, 'w') as DATA_OUT:
         DATA_OUT.write("SampleID\tCollectionDate\tCollectionTime\tReceivedDate\tReceivedTime\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
@@ -268,23 +257,49 @@ def mass_download(Samples:list=None, FilterSets:list=None):
                     if sample.hasNotepadEntries == True:
                         NPadStr = "%s\t" % ("|".join([str(x) for x in sample.NotepadEntries]))
                         DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
+
+""" Retrieves assay results for a list of Specimens.
+    FilterSets: A list of strings, designating which """
+def mass_download(Samples:list=None, FilterSets:list=None):
+    if not Samples:
+        logging.info("mass_download(): No samples supplied, loading from file")
+        with open("./ToRetrieve.txt", 'r') as DATA_IN:
+            Samples = DATA_IN.readlines()
+        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
+    logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
+    if isinstance(Samples[0], str):
+        Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
+    tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
+    samples_to_file(Samples)
     logging.info("mass_download(): Complete.")
+
+def sample_to_patient(Sample:str):
+    _tmpSample = tp_structs.Specimen(Sample)
+    if not _tmpSample.validate_ID():
+        logging.info(f"sample_to_patient(): {Sample} is not a valid specimen ID. Abort.")
+        return
+    tp_structs.complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True) #Gets patient data from SENQ
+    return tp_structs.PATIENTSTORE[_tmpSample.PatientID] # Return patient obj
 
 """ Experimental graph producer. Not working currently. """
 def visualise(Sample:str, FilterSets:list=None, nMaxSamples:int=10):
-    #From Sample To Patient
-    _tmpSample = tp_structs.Specimen(Sample)
-    if not _tmpSample.validate_ID():
-        logging.info(f"visualise(): {Sample} is not a valid specimen ID. Abort.")
-        return
-    tp_structs.complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True)
-    Patient = tp_structs.PATIENTSTORE[_tmpSample.PatientID]
+    Patient = sample_to_patient(Sample)
     Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
-    if FilterSets:
-        tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=False, ValidateSamples=False, FilterSets=FilterSets)
-    else:
-        tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False)
+    tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False)
     Patient.create_plot(FilterAnalytes=FilterSets)
+
+def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
+    Patient = sample_to_patient(Sample)
+    logging.info(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
+    Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
+    tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False, FilterSets=FilterSets)
+    logging.info("get_recent_history(): Writing to file...")
+    samples_to_file(Patient.Samples)
+
+def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0):
+    ProfX.return_to_main_menu()
+    QueueSize = 0
+    logging.info(f"auth_queue_size(): There are {QueueSize} samples awaiting authorisation.")
 
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
@@ -296,13 +311,14 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()#TrainingSystem=True)
-    aot_stub_buster()
+    #aot_stub_buster()
     #aot_stub_buster(insert_NA_result=False, get_creators=True)
-    sendaways_scan()
+    #sendaways_scan()
     #sendaways_scan(getDetailledData=True)
     #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100)
     #mass_download(recentSamples, FilterSets=["ELAST"])
-    #visualise("A,21.0570384.L", FilterSets=["CRP"], nMaxSamples=4)
+    #get_recent_history("A,21.0676517.Z", nMaxSamples=15)
+    visualise("A,21.0676517.Z", nMaxSamples=15)
 
 except Exception as e: 
     logging.error(e)

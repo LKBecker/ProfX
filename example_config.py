@@ -32,7 +32,7 @@ YOUR_HOSPITAL = Commands(
     NA="NA",                                    # Value for failed assays etc
     RELEASE="R",                                # Command to release a set
     EMPTYSTR="",                                # Empty string, used to return to previous menu
-    CANCEL_ACTION="^",                          # 'escape' command, cancels current action/returns to prev. screen. IMPORTANT.
+    CANCEL_ACTION="^",                          # 'Escape' command, cancels current action/returns to prev. screen. IMPORTANT.
     check_main_screen=your_main_screen_check,   # This function receives the whole screen's lines, and returns True if the screen is the main screen.
     check_sample_id=your_sample_check           # This function receives a sample ID and returns True if it's valid. Can just always return true if there is no check.
 )
@@ -40,5 +40,5 @@ LOCALISATION = YOUR_HOSPITAL        # Tells the system what commands are used in
 
 LIMS_IP = "192.168.0.1"             # The IP at which the LIMS can be reached
 LIMS_PORT = 23                      # Default: 23
-USER="USER"                         # If you supply a username for the LIMS, it will be automatically used to log into TelePath, else the program will for one
+USER="USER"                         # If you supply an username for the LIMS, it will be automatically used to log into TelePath, else the program will ask for one
 PW="hunter2"                        # If you supply a password, it will be used automatically, else the program will ask for one
