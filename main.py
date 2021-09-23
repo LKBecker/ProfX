@@ -7,17 +7,20 @@
         Specimen.WriteToFile and possibly TestSet.WriteToFile function(s)
         Extend Specimen() with matplotlib graphing function, or data dump (table format) -> hook into WriteToFile.
     main
-        command line arg parser lol"""
+        command line arg parser lol
+        ability to select WHERE to save files? Explorer/picker?
+        NPEX scraper lol"""
 VERSION = "1.7.0"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
-#import argparse
+import argparse
 import config
 import datetime
 import logging
 import tp_structs
 from tp_telnet import ProfX
-from tp_utils import process_whitespaced_table, timestamp
+from tp_utils import process_whitespaced_table, timestamp, extract_column_widths
+import tp_NPEX
 from collections import Counter
 import time
 
@@ -87,9 +90,9 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
 
 """ Retrieves outstanding sendaway (section AWAY) samples. For each sample, retrieves specimen notepad contents, patient details, and any set comments. """
 def sendaways_scan(getDetailledData:bool=False) -> None:
-    OverdueSAWAYs = tp_structs.get_overdue_sets("AWAY", FilterSets=["ACOV2", "COVABS"])    # Retrieve AWAY results from OVRW
-    #19.0831826.N - Sample stuck in Background Authoriser since 2019, RIP.
-    logging.info(f"sendaways_scan(): There are a total of {len(OverdueSAWAYs)} overdue samples from section 'AWAY', which are not COVABS/ACOV2.")
+    OverdueSAWAYs = tp_structs.get_overdue_sets("AWAY", FilterSets=["ACOV2", "COVABS", "ACOV2S"])    # Retrieve AWAY results from OVRW
+    OverdueSAWAYs = [x for x in OverdueSAWAYs if str(x.ID) != "19.0831826.N"] #19.0831826.N - Sample stuck in Background Authoriser since 2019, RIP.
+    logging.info(f"sendaways_scan(): There are a total of {len(OverdueSAWAYs)} overdue samples from section 'AWAY', which are not COVABS/ACOV2/ACOV2S or sample 19.0831826.N.")
     if getDetailledData:
         SAWAY_DB = tp_structs.load_sendaways_table()
         # For each sample, retrieve details: Patient FNAME LNAME DOB    
@@ -143,9 +146,9 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
                             
                         #Sample Status
                         StatusStr = "Incomplete\t"
-                        if (HSinceRequest>0 and ExpectedTAT>0):
-                            if(HSinceRequest <= ExpectedTAT):
-                                StatusStr = "Incomplete (below TAT)\t"
+                        #if (HSinceRequest>0 and ExpectedTAT>0):
+                        #    if(HSinceRequest <= ExpectedTAT):
+                        #        StatusStr = "Incomplete (below TAT)\t"
                         outStr = outStr + StatusStr
 
                         #Clinical Details
@@ -160,9 +163,9 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
                         outStr = outStr + CommStr
                         
                         #Check for Notepad
-                        NPadStr = "\t"
+                        NPadStr = ""
                         if SAWAY_Sample.hasNotepadEntries == True:
-                            NPadStr = "%s\t" % ("|".join([str(x) for x in SAWAY_Sample.NotepadEntries]))
+                            NPadStr = "|".join([str(x) for x in SAWAY_Sample.NotepadEntries])
                         outStr = outStr + NPadStr
                     
                         outStr = outStr + "\n"
@@ -228,36 +231,6 @@ def privilege_scan(userlist = None) -> None:
 def patient_download(FilterSets:list=None):
     pass
 
-def samples_to_file(Samples:list, FilterSets = None):
-    logging.info("samples_to_file(): Writing data to file.")
-    outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
-    with open(outFile, 'w') as DATA_OUT:
-        DATA_OUT.write("SampleID\tCollectionDate\tCollectionTime\tReceivedDate\tReceivedTime\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
-        for sample in Samples:
-            OutStr = sample.ID + "\t"
-            if sample.Sets:
-                if sample.Collected:
-                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M") + "\t"
-                else:
-                    OutStr = OutStr + "NA\tNA\t"
-
-                if sample.Received:
-                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M") + "\t"
-                else:
-                    OutStr = OutStr + "NA\tNA\t"
-
-                for _set in sample.Sets:
-                    if FilterSets:
-                        if _set.Code not in FilterSets: 
-                            continue
-                    if _set.Results:
-                        for _result in _set.Results:
-                            ComStr = ' '.join(_set.Comments)
-                            DATA_OUT.write(f"{OutStr}{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
-                    if sample.hasNotepadEntries == True:
-                        NPadStr = "%s\t" % ("|".join([str(x) for x in sample.NotepadEntries]))
-                        DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
-
 """ Retrieves assay results for a list of Specimens.
     FilterSets: A list of strings, designating which """
 def mass_download(Samples:list=None, FilterSets:list=None):
@@ -270,36 +243,47 @@ def mass_download(Samples:list=None, FilterSets:list=None):
     if isinstance(Samples[0], str):
         Samples = [tp_structs.Specimen(x.strip()) for x in Samples]
     tp_structs.complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
-    samples_to_file(Samples)
+    tp_structs.samples_to_file(Samples)
     logging.info("mass_download(): Complete.")
-
-def sample_to_patient(Sample:str):
-    _tmpSample = tp_structs.Specimen(Sample)
-    if not _tmpSample.validate_ID():
-        logging.info(f"sample_to_patient(): {Sample} is not a valid specimen ID. Abort.")
-        return
-    tp_structs.complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True) #Gets patient data from SENQ
-    return tp_structs.PATIENTSTORE[_tmpSample.PatientID] # Return patient obj
 
 """ Experimental graph producer. Not working currently. """
 def visualise(Sample:str, FilterSets:list=None, nMaxSamples:int=10):
-    Patient = sample_to_patient(Sample)
+    Patient = tp_structs.sample_to_patient(Sample)
     Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
     tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False)
     Patient.create_plot(FilterAnalytes=FilterSets)
 
-def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
-    Patient = sample_to_patient(Sample)
-    logging.info(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
-    Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
-    tp_structs.complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False, FilterSets=FilterSets)
-    logging.info("get_recent_history(): Writing to file...")
-    samples_to_file(Patient.Samples)
+""" Retrieve currently-active FITs and check status via NPEX website """
+def NPEX_Buster():
+    CurrentFITs = tp_structs.get_outstanding_samples_for_Set("FIT")
+    for FIT in CurrentFITs:
+        tp_NPEX.retrieve_NPEX_data(FIT)
+        #Get data
+        #Filter for correct set
+        #Retrieve Comments, Results, Status
+        #Bonus: retrieve MRI ID
+        #Display/print for user.
+        #OKAAAAAY
 
 def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0):
     ProfX.return_to_main_menu()
     QueueSize = 0
+    #TODO: 
     logging.info(f"auth_queue_size(): There are {QueueSize} samples awaiting authorisation.")
+
+def CLI():
+    parser = argparse.ArgumentParser(prog='ProfX', description='Connects to a TelePath LIMS system and extracts data.')
+    parser.add_argument('sample', help="The ID of the sample to process")
+    parser.add_argument('-t', "-training", help='Connects to training system, not live system', action="store_true")
+    parser.add_argument('-saway', '-sendaways', help='Retrieves all outstanding sendaways tests (excluding ACOV2/COVABS), with specimen notepad and any Set notes', action="store_true")
+    parser.add_argument('-aot', '-aotBuster', help="Finds all outstanding samples with AOT (Add-on tests). Can also retrieve the creator of such stubs, and can NA the AOT entry automatically", action="store_true")
+    parser.add_argument('-outfile', '-o', help='Filename for any output data.')
+    parser.add_argument('-h', '-history', help='Retrieves recent test results for the patient associated with a sample, and displays or outputs them.', action="store_true")
+    parser.add_argument('-dl', '-download', help='Retrieves results for a list of samples.', action="store_true")
+    parser.add_argument('-test', help='Specifies the test to download')
+    parser.add_argument('-user', help='Specifies the user to access the system as. Overrides config.py. Will require user to enter their password.')
+
+    args = parser.parse_args()    
 
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
@@ -311,14 +295,17 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()#TrainingSystem=True)
+    #if __name__ == "__main__":
+    #    CLI()
     #aot_stub_buster()
     #aot_stub_buster(insert_NA_result=False, get_creators=True)
     #sendaways_scan()
     #sendaways_scan(getDetailledData=True)
     #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100)
     #mass_download(recentSamples, FilterSets=["ELAST"])
-    #get_recent_history("A,21.0676517.Z", nMaxSamples=15)
-    visualise("A,21.0676517.Z", nMaxSamples=15)
+    #tp_structs.get_recent_history("A,21.0676517.Z", nMaxSamples=15)
+    NPEX_Buster()
+    #visualise("A,21.0676517.Z", nMaxSamples=15)
 
 except Exception as e: 
     logging.error(e)
@@ -327,17 +314,5 @@ finally:
     ProfX.disconnect()
     logging.info("System is now shut down. Have a nice day!")
 
-"""
-#if __name__ == "__main__":
-    #parser = argparse.ArgumentParser(prog='ProfX', description='Connects to the TelePath LIMS system and extracts data')
-    #parser.add_argument('-t', "-training", help='Connects to training system, not live system', action="store_true")
-    #parser.add_argument('-saway', '-sendaways', help='retrieves and writes to file current outstanding sendaways, with specimen notepad and any Set notes', action="store_true")
-    #parser.add_argument('-aot', '-aotBuster', help='Finds all outstanding samples with AOT (Add-on tests) and NA/'s the AOT entry', action="store_true")
-    #
-    #parser.add_argument('-dl', '-download', help='Loads', action="store_true")
-    #parser.add_argument('-test', help='Specifies the test to download')
-    #
-    #args = parser.parse_args()
-"""
 
 # 21-05-04 TP accessible from ORC machine -> networks are accessible

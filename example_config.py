@@ -23,6 +23,7 @@ YOUR_HOSPITAL = Commands(
     NPCLSETS="NPSET",                           # Check/edit NPCL lists
     SNPCL="SNPCL",                              # Check/edit NPCL sorting/intermediates
     AUTOCOMMENTS="AUCOM",                       # Check/edit autocomments
+    OUTSTANDING_WORK="OUTS",                    # Not yet overdue but also not complete
     OVERDUE_SAMPLES="OVRW",                     # Check overdue sets
     OVERDUE_AUTOMATION="AUTO",                  # Overdue sets, section AUTOMATION
     OVERDUE_SENDAWAYS="AWAY",                   # Overdue sets, section SENDAWAYS

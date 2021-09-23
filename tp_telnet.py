@@ -299,6 +299,10 @@ class Screen():
             self.Type ="PENQ"
         elif IDLine == "ON-CALL?": 
             self.Type = "ONCALL_PreMenu"
+        elif IDLine == "Outstanding work. Select parameters":
+            self.Type = "OUTW_Basic"
+        elif IDLine=="Outstanding work. Detailed by set. (Work without results. May be worksheeted)":
+            self.Type = "OUTW_Data"
 
         Local_Main_Menu = config.LOCALISATION.check_main_screen(self.Lines)
         if Local_Main_Menu:

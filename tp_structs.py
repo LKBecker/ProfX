@@ -1,7 +1,7 @@
 #GPL-3.0-or-later
 
 from tp_telnet import ProfX, Screen
-from tp_utils import process_whitespaced_table, extract_column_widths, calc_grid
+from tp_utils import process_whitespaced_table, extract_column_widths, calc_grid, timestamp
 import config
 
 from collections import Counter
@@ -515,6 +515,7 @@ class Specimen():
     
     def validate_ID(self) -> bool: return self._ID.validate()
     
+    
 """Contains data pertaining to a patient. PII-heavy, DO NOT EXPORT"""
 class Patient():
     def __init__(self, ID):
@@ -675,6 +676,7 @@ class Patient():
         if not new_sample.ID in IDs:
             self.Samples.append(new_sample)
         #TODO: Cross-compare sample to sample? Complete information?
+
 
 """Contains data about a Sendaway Assay - receiving location, contact, expected TAT"""
 class ReferralLab():
@@ -1000,6 +1002,81 @@ def value_or_none(item):
     if item:
         return item
     return None
+
+def get_outstanding_samples_for_Set(Set:str, Section:str=""):
+    dataLogger.info(f"get_outstanding_samples_for_Set(): Retrieving items for Set [{Set}]")
+    ProfX.return_to_main_menu()
+    ProfX.send(config.LOCALISATION.OUTSTANDING_WORK)
+    ProfX.read_data()
+    ProfX.send(Section)
+    ProfX.read_data()
+    if ProfX.screen.hasErrors:
+        #idk handle errors what am i a professional coder
+        pass
+    ProfX.send("2") # Request 'Detailed outstanding work by set'
+    ProfX.send(Set)
+    ProfX.read_data()
+    ProfX.send("0", quiet=True) # Output on 'screen'
+    time.sleep(0.2)
+    OutstandingSamples = []
+    tmp_table_widths = [1, 5, 20, 32, 39, 58, 61, 71, 74] # These are hardcoded because the headers seem misaligned.
+    while ProfX.screen.DefaultOption != "Q":
+        ProfX.read_data()
+        #tmp_table_widths = extract_column_widths(ProfX.screen.Lines[4])
+        tmp = process_whitespaced_table(ProfX.screen.Lines[7:-2], tmp_table_widths) #read and process screen
+        for x in tmp:
+            OutstandingSamples.append(x[1]) #Sample ID is in the second column; off by one makes that index 1. 
+        ProfX.send(ProfX.screen.DefaultOption, quiet=True) 
+    ProfX.send("Q")
+    dataLogger.info(f"get_outstanding_samples_for_Set(): Located {len(OutstandingSamples)} samples.")
+    return OutstandingSamples
+
+def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
+    Patient = sample_to_patient(Sample)
+    logging.info(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
+    Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
+    complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False, FilterSets=FilterSets)
+    logging.info("get_recent_history(): Writing to file...")
+    samples_to_file(Patient.Samples)
+
+def samples_to_file(Samples:list, FilterSets = None):
+    logging.info("samples_to_file(): Writing data to file.")
+    outFile = f"./{timestamp(fileFormat=True)}_TPDownload.txt"
+    with open(outFile, 'w') as DATA_OUT:
+        DATA_OUT.write("SampleID\tCollectionDate\tCollectionTime\tReceivedDate\tReceivedTime\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
+        for sample in Samples:
+            OutStr = sample.ID + "\t"
+            if sample.Sets:
+                if sample.Collected:
+                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M") + "\t"
+                else:
+                    OutStr = OutStr + "NA\tNA\t"
+
+                if sample.Received:
+                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M") + "\t"
+                else:
+                    OutStr = OutStr + "NA\tNA\t"
+
+                for _set in sample.Sets:
+                    if FilterSets:
+                        if _set.Code not in FilterSets: 
+                            continue
+                    if _set.Results:
+                        for _result in _set.Results:
+                            ComStr = ' '.join(_set.Comments)
+                            DATA_OUT.write(f"{OutStr}{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
+                    if sample.hasNotepadEntries == True:
+                        NPadStr = "|".join([str(x) for x in sample.NotepadEntries])
+                        DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
+
+def sample_to_patient(Sample:str):
+    _tmpSample = Specimen(Sample)
+    if not _tmpSample.validate_ID():
+        logging.info(f"sample_to_patient(): {Sample} is not a valid specimen ID. Abort.")
+        return
+    complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True) #Gets patient data from SENQ
+    return PATIENTSTORE[_tmpSample.PatientID] # Return patient obj
+
 
 REF_RANGES = load_reference_ranges()
 PATIENTSTORE = PatientContainer()

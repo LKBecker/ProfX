@@ -9,3 +9,5 @@
 config.py
 config_apex.py
 tests.py
+*.html
+*_files/*
