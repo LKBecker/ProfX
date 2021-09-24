@@ -502,26 +502,24 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         ProfX.tn.read_until(b"User ID :")
         if config.USER:
             if config.USER != "YOUR USERNAME HERE":
-                ProfX.send(config.USER)
-            user = input("Enter your TelePath username and press enter: ")
-            ProfX.send(user.upper())
+                user = config.USER
+            else:
+                user = input("Enter your TelePath username: ")
         else:
             user = input("Enter your TelePath username: ")
-            ProfX.send(user)
-            #TODO: check data returned, if username wrong re-query
+        ProfX.send(user.upper())
+            #TODO: check data returned, if username wrong, re-query
         ProfX.tn.read_until(b"Password:")
         ProfX.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
         if config.PW:
             if config.PW == "YOUR PASSWORD HERE":
-                PW = getpass.getpass()
+                pw = getpass.getpass()
             else:
-                PW = config.PW
-            ProfX.send(PW, quiet=True, readEcho=False)
-            ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s        
+                pw = config.PW     
         else:
-            PW = getpass.getpass()
-            ProfX.send(PW, quiet=True, readEcho=False)
-            ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s
+            pw = getpass.getpass()
+        ProfX.send(pw, quiet=True, readEcho=False)
+        ProfX.tn.read_until(b"*"*len(pw)) #TelePath will echo the PW as *s
         ProfX.tn.set_debuglevel(ProfX.DEBUGLEVEL) #Resume previous debugging level (if >0)
         #TODO: be able to work with errors!
         telnetLogger.info("Connected to TelePath. Reading first screen...")

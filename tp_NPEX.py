@@ -57,18 +57,25 @@ def get_NPEX_login():
         raise Exception("get_NPEX_login(): Status code is not 200, could not retrieve session. Check login details and connection.")
 
 def retrieve_NPEX_samples(Samples:list):
+    headerStr = "SpecimenID\tPerforming Lab ID\tTest\tStatus\tResult\tComments"
     data = []
     for sample in Samples:
         try:
-            data.append(retrieve_NPEX_data(sample))
-        except:
+            item = retrieve_NPEX_data(sample)
+            data.append(item)
+        except Exception as e: 
+            print(e)
             continue
-    with open(f'./NPEX-Extract_{timestamp(fileFormat=True)}.log', 'w') as NPEX_Outfile:
-        NPEX_Outfile.write("SpecimenID\tPerforming Lab ID\tTest\tResult\tComments\tMapped\tRequested\tAccepted\tPerforming\tCompleted")
-        for item in data:
-            NPEX_Outfile.write(f"\n") #TODO finish
-    
 
+    with open(f'./NPEX-Extract_{timestamp(fileFormat=True)}.log', 'w') as NPEX_Outfile:
+        NPEX_Outfile.write(headerStr)
+        print(headerStr)
+        for sample in data:
+            parentStr = f"{sample.ID}\t{sample.PerformingLabID}"
+            for result in sample.Results:
+                finalStr = parentStr+ f"{result.Set}\t{result.Status}\t{result.Value}\t{';'.join(result.Comments)}\n"
+                NPEX_Outfile.write(finalStr)
+                print(finalStr)
 
 def retrieve_NPEX_data(SampleID: str):
 
@@ -82,8 +89,8 @@ def retrieve_NPEX_data(SampleID: str):
         get_NPEX_login()
         
     Sample_URL = NPEX_ROOT_LINK + quote_plus(SampleID)
-    npexLogger.info(f"retrieve_NPEX_data(): Retrieving sample [{SampleID}].")
     SampleData = NPEX_SESSION.get(Sample_URL)                                               # Retrieves the entire NPEX Webpage
+    NPEXSample = NPEX_Entry(SampleID=SampleID)
     if SampleData.status_code != 200:
         if SampleData.status_code == 400:
             npexLogger.error(f"retrieve_NPEX_data(): NPEX answered with code [400 BAD REQUEST]. Please report this error to the program author (vit GitHub).")
@@ -93,12 +100,12 @@ def retrieve_NPEX_data(SampleID: str):
             raise Exception(f"retrieve_NPEX_data(): 403 FORBIDDEN for user {config.NPEX_USER}.")
         if SampleData.status_code == 404:
             npexLogger.info(f"retrieve_NPEX_data(): NPEX answered with code [404 NOT FOUND]. Your sample does not exist on NPEX.")
-            return []
+            return NPEXSample
         else:
             npexLogger.info(f"retrieve_NPEX_data(): NPEX answered with code [{SampleData.status_code}]. Your request could not be compledted.")
             raise Exception(f"retrieve_NPEX_data(): [{SampleData.status_code}] for sample [{SampleID}], user [{config.NPEX_USER}].")
 
-    NPEXSample = NPEX_Entry(SampleID=SampleID)
+    
 
     SampleDataSoup = BeautifulSoup(SampleData.text, 'html.parser')                          # Turns it into soup (a parsed tree of HTML elements more easily traversable)
     
@@ -108,25 +115,35 @@ def retrieve_NPEX_data(SampleID: str):
     # There -is- an option to retrieve a full audit trail but nobody's requested that. Also it involved javascript so... let's not do that.
     for AuditItem in AuditHistory.findAllNext("span", class_="state-icon-header"):
         NPEXSample.AuditTrail.append( (AuditItem.text.strip(), AuditItem.attrs['title']) )                   # Here, we make tuples with (timestamp, action) for the audit trail
-    
+       
+
     # results are in a <table> of class results. :)
-    ResultsTable = SampleDataSoup.find("table", class_="results")                           
-    ResultsTableBody = ResultsTable.findChild("tbody")
-    ResultRows = ResultsTableBody.findAllNext("tr", class_="result")
-    for ResultRow in ResultRows:                                                            
-        _name           = ResultRow.findChild("td", class_="result-name").text
-        _status         = ResultRow.findChild("td", class_="result-status").text
-        _value          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-value")
-        _range          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-range")
-        _comments       = [ ]
-        _comment = ResultRow.findChild("td", class_="result-comments")
-        if _comment:
-            _comments.append(_comment.text.replace('\n', '').strip())
-        _flags          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-flags")
-        _subComments    = ResultRow.find_next("tr").findAllNext("td", class_="result-comment")
-        for secondaryComment in _subComments:           # I would just pull out all <td> object with result-xxx class, 
-            _comments.append( secondaryComment.text.replace('\n', '').strip() )   # but the freetext comments are in a later row, with no name, ID, or class. 
-                                                        # It's easier to process them by position.
-        NPEXSample.Results.append( NPEX_Result(SampleID=SampleID, Set=_name, Status=_status, Flags=_flags, Range=_range, Value=_value, Comments=_comments) )
-    
+    ResultsTable = SampleDataSoup.find("table", class_="results")      
+    if ResultsTable:                     
+        ResultsTableBody = ResultsTable.findChild("tbody")
+        ResultRows = ResultsTableBody.findAllNext("tr", class_="result")
+        for ResultRow in ResultRows:                                                            
+            _name           = ResultRow.findChild("td", class_="result-name").text
+            _status         = ResultRow.findChild("td", class_="result-status").text
+            _value          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-value")
+            _range          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-range")
+            _comments       = [ ]
+            _comment = ResultRow.findChild("td", class_="result-comments")
+            if _comment:
+                _comments.append(_comment.text.replace('\n', '').strip())
+            _flags          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-flags")
+            _subComments    = ResultRow.find_next("tr").findAllNext("td", class_="result-comment")
+            for secondaryComment in _subComments:           # I would just pull out all <td> object with result-xxx class, 
+                _comments.append( secondaryComment.text.replace('\n', '').strip() )   # but the freetext comments are in a later row, with no name, ID, or class. 
+                                                            # It's easier to process them by position.
+            NPEXSample.Results.append( NPEX_Result(SampleID=SampleID, Set=_name, Status=_status, Flags=_flags, Range=_range, Value=_value, Comments=_comments) )
+            #npexLogger.info(f"retrieve_NPEX_data(): Successfully retrieved sample [{SampleID}].")
+    else:
+        currentStatus = AuditHistory.findChild("li", class_="current")
+        try:
+            currentStatus = currentStatus.attrs['title']
+        except KeyError:
+            currentStatus = AuditHistory.findChild("li", class_="current").findChild("span").attrs['title']
+        #npexLogger.info(f"retrieve_NPEX_data(): No results available for sample [{SampleID}]; current status is [{currentStatus}].")
+        NPEXSample.Results.append( NPEX_Result(SampleID, "N/A", currentStatus) )
     return(NPEXSample)

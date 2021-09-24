@@ -250,15 +250,7 @@ def NPEX_Buster(Set:str="FIT"):
     logging.info(f"NPEX_Buster(): Retrieving outstanding [{Set}] samples...")
     CurrentSets = tp_structs.get_outstanding_samples_for_Set(Set)
     logging.info(f"NPEX_Buster(): {len(CurrentSets)} samples found. Checking NPEx...")
-    for _Set in CurrentSets:
-        logging.debug(f"NPEX_Buster(): Retrieving {_Set} from NPEx.")
-        tp_NPEX.retrieve_NPEX_data(_Set)
-        #Get data
-        #Filter for correct set
-        #Retrieve Comments, Results, Status
-        #Bonus: retrieve MRI ID
-        #Display/print for user.
-        #OKAAAAAY
+    tp_NPEX.retrieve_NPEX_samples(CurrentSets)
 
 def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0):
     ProfX.return_to_main_menu()
@@ -436,25 +428,23 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()
-
-    BasicInterface()
+    #BasicInterface()
 
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
     
     #sendaways_scan() # Shows how many overdue sendaways there are
-    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv
+    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
     
     #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100) # Retrieves up to 100 recent samples with ELAST. Good for hunting for spare samples to test things.
     #mass_download(recentSamples, FilterSets=["ELAST"]) # Downloads and saves into a file all the results for the samples retrieved earlier. Filters for Set in FilterSets.
-    
     #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
     
     #tp_structs.get_recent_history("A,21.0676517.Z", nMaxSamples=15) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
-
-    #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
-    #Currently, the function just shows NPEX results - in a future version, it will be able to auto-enter them. 
     
+    NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
+    #tp_NPEX.retrieve_NPEX_data("A,21.7784000.W")
+
     #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
 
 except Exception as e: 
