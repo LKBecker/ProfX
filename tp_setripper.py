@@ -1,3 +1,5 @@
+#GPL-3.0-or-later
+
 import datetime
 from tp_telnet import ProfX, Screen
 from tp_utils import process_whitespaced_table, extract_column_widths
@@ -15,7 +17,7 @@ class SetDefinition():
         self.AuthGroup = AuthorisationGroup
         self.AutoCommGroup = AutoCommentGroup
         self.Success = AccessedSuccessfully
-        self.AuthGrpObj = None
+        self.AuthGrpObj = []
         self.AutocomObj = None
     
     def __str__(self): 

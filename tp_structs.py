@@ -988,7 +988,8 @@ def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, La
 def load_reference_ranges(filePath="./Limits.txt"):
     RefRanges = []
     if not os.path.isfile(filePath):
-        raise IOError
+        logging.error("Missing reference_ranges.tsv file in installation directory. Will not be able to use Reference Ranges for graphs.")
+        return []
     with open(filePath, 'r') as RefRangeFile:
         for line in RefRangeFile:
             tmp = line.split("\t")

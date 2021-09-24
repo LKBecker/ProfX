@@ -1,3 +1,5 @@
+#GPL-3.0-or-later
+
 import config
 import getpass
 import logging
@@ -415,11 +417,11 @@ class Screen():
 class ProfX(): #Because it's a more powerful TelePath(y) user
     """ Contains methods and strutures to connect to, and exchange data with, the TelePath LIMS system """
     tn=telnetlib.Telnet()
-    IP                  = config.LIMS_IP   # love 2 LAN
-    PORT                = config.LIMS_PORT # technically pointless, but let's be precise
+    IP                  = config.LIMS_IP    # love 2 LAN
+    PORT                = config.LIMS_PORT  # technically pointless, but let's be precise
     DEBUGLEVEL          = 0                 # value >0 will show (parts of) telnet traffic on-screen, this may include your password 
-    #MAX_WINDOW_WIDTH    = 5000              # Max Value: 65535
-    MAX_WINDOW_WIDTH    = 128              # Max Value: 65535
+    #MAX_WINDOW_WIDTH    = 5000             # Max Value: 65535
+    MAX_WINDOW_WIDTH    = 128               # Max Value: 65535
     MAX_WINDOW_HEIGHT   = 5000              # 
     TERMCOUNTER         = 1                 # keeps track of how many terminal types we're already tried.
     TERMINALS           = [b"", b"VT100", b"VT102", b"NETWORK-VIRTUAL-TERMINAL", b"UNKNWN"] #A list of the different terminal types we're willing to lie and pretend we are
@@ -499,7 +501,10 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         ProfX.tn.write(config.LOCALISATION.ANSWERBACK)
         ProfX.tn.read_until(b"User ID :")
         if config.USER:
-            ProfX.send(config.USER)
+            if config.USER != "YOUR USERNAME HERE":
+                ProfX.send(config.USER)
+            user = input("Enter your TelePath username and press enter: ")
+            ProfX.send(user.upper())
         else:
             user = input("Enter your TelePath username: ")
             ProfX.send(user)
@@ -507,8 +512,12 @@ class ProfX(): #Because it's a more powerful TelePath(y) user
         ProfX.tn.read_until(b"Password:")
         ProfX.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
         if config.PW:
-            ProfX.send(config.PW, quiet=True, readEcho=False)
-            ProfX.tn.read_until(b"*"*len(config.PW)) #TelePath will echo the PW as *s
+            if config.PW == "YOUR PASSWORD HERE":
+                PW = getpass.getpass()
+            else:
+                PW = config.PW
+            ProfX.send(PW, quiet=True, readEcho=False)
+            ProfX.tn.read_until(b"*"*len(PW)) #TelePath will echo the PW as *s        
         else:
             PW = getpass.getpass()
             ProfX.send(PW, quiet=True, readEcho=False)

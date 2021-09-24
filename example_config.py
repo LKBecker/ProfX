@@ -1,3 +1,5 @@
+#GPL-3.0-or-later
+
 from tp_localisation import Commands
 
 # Function to test if a SampleID is valid according to your local rules.
@@ -41,5 +43,5 @@ LOCALISATION = YOUR_HOSPITAL        # Tells the system what commands are used in
 
 LIMS_IP = "192.168.0.1"             # The IP at which the LIMS can be reached
 LIMS_PORT = 23                      # Default: 23
-USER="USER"                         # If you supply an username for the LIMS, it will be automatically used to log into TelePath, else the program will ask for one
-PW="hunter2"                        # If you supply a password, it will be used automatically, else the program will ask for one
+USER="YOUR USERNAME HERE"           # If you supply an username for the LIMS, it will be automatically used to log into TelePath, else the program will ask for one
+PW="YOUR PASSWORD HERE"             # If you supply a password, it will be used automatically, else the program will ask for one

@@ -1,16 +1,6 @@
 ﻿#GPL-3.0-or-later
 
-"""#TODO:
-    telePath_telnet
-        Update recognizeScreen() to also check whether data field(s) are filled in -> SpecEnquiry_Blank / SpecEnquiry_Filled; Notepad_Blank/ Notepad_Patient/ Notepad_Entry;   
-    telePath_data
-        Specimen.WriteToFile and possibly TestSet.WriteToFile function(s)
-        Extend Specimen() with matplotlib graphing function, or data dump (table format) -> hook into WriteToFile.
-    main
-        command line arg parser lol
-        ability to select WHERE to save files? Explorer/picker?
-        NPEX scraper lol"""
-VERSION = "1.7.0"
+VERSION = "1.8.3"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
 import argparse
@@ -22,6 +12,7 @@ from tp_telnet import ProfX
 from tp_utils import process_whitespaced_table, timestamp, extract_column_widths
 import tp_NPEX
 from collections import Counter
+import re
 import time
 
 """ Locates samples with AOT beyond TAT (...i.e. any), and marks the AOT as 'NA' if insert_NA_result is set to True """
@@ -228,7 +219,8 @@ def privilege_scan(userlist = None) -> None:
     logging.info("privilege_scan(): Complete.")
 
 """ retrieves a list of recent speciments for a patient, and runs mass_download() on them. """
-def patient_download(FilterSets:list=None):
+def patient_download(SampleID, FilterSets:list=None):
+    
     pass
 
 """ Retrieves assay results for a list of Specimens.
@@ -254,10 +246,13 @@ def visualise(Sample:str, FilterSets:list=None, nMaxSamples:int=10):
     Patient.create_plot(FilterAnalytes=FilterSets)
 
 """ Retrieve currently-active FITs and check status via NPEX website """
-def NPEX_Buster():
-    CurrentFITs = tp_structs.get_outstanding_samples_for_Set("FIT")
-    for FIT in CurrentFITs:
-        tp_NPEX.retrieve_NPEX_data(FIT)
+def NPEX_Buster(Set:str="FIT"):
+    logging.info(f"NPEX_Buster(): Retrieving outstanding [{Set}] samples...")
+    CurrentSets = tp_structs.get_outstanding_samples_for_Set(Set)
+    logging.info(f"NPEX_Buster(): {len(CurrentSets)} samples found. Checking NPEx...")
+    for _Set in CurrentSets:
+        logging.debug(f"NPEX_Buster(): Retrieving {_Set} from NPEx.")
+        tp_NPEX.retrieve_NPEX_data(_Set)
         #Get data
         #Filter for correct set
         #Retrieve Comments, Results, Status
@@ -285,6 +280,152 @@ def CLI():
 
     args = parser.parse_args()    
 
+def BasicInterface():
+    def get_user_input(FilterFunction, FormatReminder, Prompt:str="Please make your selection: ", lowerBound=None, upperBound=None):
+        while True:
+            _input = input(Prompt)
+            if FilterFunction(_input, lowerBound, upperBound):
+                return _input
+            print(f"Input '{_input}' was not recognised. {FormatReminder}")
+
+    def is_numeric(UserInput:str, lowerBound:None, upperBound:None):
+        try:
+            a = int(UserInput)
+            if lowerBound:
+                if a >= lowerBound:
+                    return True
+                return False
+
+            if upperBound:
+                if a <= upperBound:
+                    return True
+                return False
+            
+            return True
+        
+        except:
+            return False
+
+    def is_alphanumeric(UserInput:str, lowerBound:None, upperBound:None):
+        if UserInput == re.sub('[\W0-9]+', '', UserInput):
+            return True
+        return False
+
+    def is_sample(UserInput:str, lowerBound:None, upperBound:None):
+        _sample = tp_structs.SampleID(UserInput)
+        return _sample.validate()
+
+    print("""
+    
+    Welcome to the ProfX custom TelePath client.
+    
+    Please select from the following options:
+    
+        1   Sendaway processing
+        2   Closing outstanding AOTs for automation
+        3   Mass download of results
+        4   NPEX interface
+        5   Retrieve recent samples for a Set
+        6   Generate Patient history/graphs
+        7   Set ripper for Beaker
+        8   Exit
+    """)
+    choice = get_user_input(is_numeric, "Please select a number from 1 to 8:", "Please select from the above options: ", 1, 8)
+
+    if choice=="1": # Sendaways
+        print("""
+    
+    Sendaways processing menu
+    
+    Please select from the following options:
+
+        1   List number of outstanding sendaways
+        2   Generate outstanding sendaways table      
+        
+        """)
+        choice2 = get_user_input(is_numeric, "Please select a number from 1 to 2.", "Please select from the above options: ", 1, 2)
+        if choice2 == "1":
+            sendaways_scan()
+        if choice2 =="2":
+            sendaways_scan(getDetailledData=True)
+
+    if choice=="2": #AOTs
+        print("""
+    
+    Outstanding AOTs menu
+    
+    Please select from the following options:
+
+        1   List number of open AOTs for section AUTO
+        2   Close all open AOTs for section AUTO
+        3   List creators for all open AOTs for section AUTO
+        4   Close all open AOTs for section AUTO and list creators
+        """)
+        choice2 = get_user_input(is_numeric, "Please select a number from 1 to 4.", "Please select from the above options: ", 1, 4)
+        if choice2 == "1":
+            aot_stub_buster()
+        if choice2 =="2":
+            aot_stub_buster(insert_NA_result=True)
+        if choice2 =="3":
+            aot_stub_buster(get_creators=True)
+        if choice2 =="4":
+            aot_stub_buster(insert_NA_result=True, get_creators=True)
+
+    if choice=="3": #Mass Download
+        print("""
+    Mass data download menu
+    
+    Please select from the following options:
+
+        1   Download a number of recent results for a set
+        2   Download samples from an external file
+        """)
+        choice2 = get_user_input(is_numeric, "Please select a number from 1 to 2.", "Please select from the above options: ", 1, 2)
+        if choice2 == "1":
+            SetToDL = get_user_input("For which set do you want to retreive samples? ", is_alphanumeric, "Please use only A-Za-z and 0-9.")
+            NSets   = get_user_input("How many samples do you want to retrieve at most? ", is_numeric, "Please enter a number between 1 and 100.", 1, 100)
+            SampleList = tp_structs.get_recent_samples_of_set_type(SetToDL, nMaxSamples=int(NSets))
+            mass_download(Samples=SampleList)
+        if choice2 =="2":
+            mass_download()
+
+    if choice=="4": #NPEX interface
+        print("""
+    NPEX Interface
+    
+    Preparing to retrieve outstanding sample data from NPEx...
+        """)
+        SetToDL = get_user_input(is_alphanumeric, "Please use only A-Za-z and 0-9.", "For which set do you want to retreive NPEX data? ")
+        NPEX_Buster(SetToDL)
+
+    if choice=="5":
+        print("""
+    Recent samples
+    
+        """)
+        SetToDL = get_user_input(is_alphanumeric, "Please use only A-Za-z and 0-9.", "For which set do you want to retrieve recent samples? ")
+        NSets   = get_user_input(is_numeric, "Please enter a number between 1 and 100.", "How many samples do you want to retrieve at most? ", 1, 100)
+        print(tp_structs.get_recent_samples_of_set_type(SetToDL, nMaxSamples=NSets))
+        
+    if choice=="6":
+        print("""
+    Patient history
+    
+        """)
+        SampleToDL = get_user_input(is_sample, "Please enter a valid sample ID.", "Which sample do you wish to generate a patient history from? ")
+        tp_structs.get_recent_history(SampleToDL, nMaxSamples=15)
+
+    if choice=="7":
+        import tp_setripper
+        SetsIO = open("./SetsToExtract.txt", "r")
+        SetsToRip = SetsIO.readlines()
+        SetsIO.close()
+        SetsToRip = [x.strip() for x in SetsToRip]
+        tp_setripper.set_ripper(SetsToRip)
+
+    else:
+        return
+
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
@@ -294,18 +435,27 @@ logging.getLogger().addHandler(console)
 logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
 
 try:
-    ProfX.connect()#TrainingSystem=True)
-    #if __name__ == "__main__":
-    #    CLI()
-    #aot_stub_buster()
-    #aot_stub_buster(insert_NA_result=False, get_creators=True)
-    #sendaways_scan()
-    #sendaways_scan(getDetailledData=True)
-    #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100)
-    #mass_download(recentSamples, FilterSets=["ELAST"])
-    #tp_structs.get_recent_history("A,21.0676517.Z", nMaxSamples=15)
-    NPEX_Buster()
-    #visualise("A,21.0676517.Z", nMaxSamples=15)
+    ProfX.connect()
+
+    BasicInterface()
+
+    #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
+    #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
+    
+    #sendaways_scan() # Shows how many overdue sendaways there are
+    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv
+    
+    #recentSamples = tp_structs.get_recent_samples_of_set_type("ELAST", nMaxSamples=100) # Retrieves up to 100 recent samples with ELAST. Good for hunting for spare samples to test things.
+    #mass_download(recentSamples, FilterSets=["ELAST"]) # Downloads and saves into a file all the results for the samples retrieved earlier. Filters for Set in FilterSets.
+    
+    #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
+    
+    #tp_structs.get_recent_history("A,21.0676517.Z", nMaxSamples=15) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
+
+    #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
+    #Currently, the function just shows NPEX results - in a future version, it will be able to auto-enter them. 
+    
+    #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
 
 except Exception as e: 
     logging.error(e)
@@ -313,6 +463,4 @@ except Exception as e:
 finally:
     ProfX.disconnect()
     logging.info("System is now shut down. Have a nice day!")
-
-
-# 21-05-04 TP accessible from ORC machine -> networks are accessible
+    input("Press any key to exit...")
