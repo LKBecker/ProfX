@@ -71,11 +71,11 @@ def retrieve_NPEX_samples(Samples:list):
         NPEX_Outfile.write(headerStr)
         print(headerStr)
         for sample in data:
-            parentStr = f"{sample.ID}\t{sample.PerformingLabID}"
+            parentStr = f"{sample.ID}\t{sample.PerformingLabID}\t"
             for result in sample.Results:
-                finalStr = parentStr+ f"{result.Set}\t{result.Status}\t{result.Value}\t{';'.join(result.Comments)}\n"
+                finalStr = parentStr+ f"{result.Set}\t{result.Status}\t{result.Value}\t{' '.join(result.Comments)}\n"
                 NPEX_Outfile.write(finalStr)
-                print(finalStr)
+                print(finalStr, end = '')
 
 def retrieve_NPEX_data(SampleID: str):
 
@@ -123,8 +123,8 @@ def retrieve_NPEX_data(SampleID: str):
         ResultsTableBody = ResultsTable.findChild("tbody")
         ResultRows = ResultsTableBody.findAllNext("tr", class_="result")
         for ResultRow in ResultRows:                                                            
-            _name           = ResultRow.findChild("td", class_="result-name").text
-            _status         = ResultRow.findChild("td", class_="result-status").text
+            _name           = ResultRow.findChild("td", class_="result-name").text.strip()
+            _status         = ResultRow.findChild("td", class_="result-status").text.strip()
             _value          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-value")
             _range          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-range")
             _comments       = [ ]
@@ -134,7 +134,7 @@ def retrieve_NPEX_data(SampleID: str):
             _flags          = textOrDefault(ResultRow, ChildType="td", ChildClass="result-flags")
             _subComments    = ResultRow.find_next("tr").findAllNext("td", class_="result-comment")
             for secondaryComment in _subComments:           # I would just pull out all <td> object with result-xxx class, 
-                _comments.append( secondaryComment.text.replace('\n', '').strip() )   # but the freetext comments are in a later row, with no name, ID, or class. 
+                _comments.append( secondaryComment.text.replace('\n', ' ').replace('  ', ' ').strip() )   # but the freetext comments are in a later row, with no name, ID, or class. 
                                                             # It's easier to process them by position.
             NPEXSample.Results.append( NPEX_Result(SampleID=SampleID, Set=_name, Status=_status, Flags=_flags, Range=_range, Value=_value, Comments=_comments) )
             #npexLogger.info(f"retrieve_NPEX_data(): Successfully retrieved sample [{SampleID}].")

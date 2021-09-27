@@ -415,8 +415,7 @@ def BasicInterface():
         SetsToRip = [x.strip() for x in SetsToRip]
         tp_setripper.set_ripper(SetsToRip)
 
-    else:
-        return
+    input("Press any key to exit...")
 
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
@@ -428,7 +427,7 @@ logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, u
 
 try:
     ProfX.connect()
-    #BasicInterface()
+    BasicInterface()
 
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
@@ -442,7 +441,7 @@ try:
     
     #tp_structs.get_recent_history("A,21.0676517.Z", nMaxSamples=15) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
     
-    NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
+    #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
     #tp_NPEX.retrieve_NPEX_data("A,21.7784000.W")
 
     #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
@@ -453,4 +452,3 @@ except Exception as e:
 finally:
     ProfX.disconnect()
     logging.info("System is now shut down. Have a nice day!")
-    input("Press any key to exit...")
