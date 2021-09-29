@@ -4,7 +4,7 @@ import config
 from tp_structs import Specimen, SampleID
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode, quote_plus
-from tp_utils import timestamp
+from utils import timestamp
 import requests
 import logging
 
@@ -57,7 +57,7 @@ def get_NPEX_login():
         raise Exception("get_NPEX_login(): Status code is not 200, could not retrieve session. Check login details and connection.")
 
 def retrieve_NPEX_samples(Samples:list):
-    headerStr = "SpecimenID\tPerforming Lab ID\tTest\tStatus\tResult\tComments"
+    headerStr = "SpecimenID\tPerforming Lab ID\tTest\tStatus\tResult\tComments\n"
     data = []
     for sample in Samples:
         try:
@@ -69,7 +69,7 @@ def retrieve_NPEX_samples(Samples:list):
 
     with open(f'./NPEX-Extract_{timestamp(fileFormat=True)}.log', 'w') as NPEX_Outfile:
         NPEX_Outfile.write(headerStr)
-        print(headerStr)
+        print(headerStr, end='')
         for sample in data:
             parentStr = f"{sample.ID}\t{sample.PerformingLabID}\t"
             for result in sample.Results:

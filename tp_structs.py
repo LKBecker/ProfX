@@ -1,7 +1,7 @@
 #GPL-3.0-or-later
 
 from tp_telnet import ProfX, Screen
-from tp_utils import process_whitespaced_table, extract_column_widths, calc_grid, timestamp
+from utils import process_whitespaced_table, extract_column_widths, calc_grid, timestamp
 import config
 
 from collections import Counter

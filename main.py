@@ -9,7 +9,7 @@ import datetime
 import logging
 import tp_structs
 from tp_telnet import ProfX
-from tp_utils import process_whitespaced_table, timestamp, extract_column_widths
+from utils import process_whitespaced_table, timestamp, extract_column_widths
 import tp_NPEX
 from collections import Counter
 import re
@@ -426,8 +426,8 @@ logging.getLogger().addHandler(console)
 logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
 
 try:
-    ProfX.connect()
-    BasicInterface()
+    #ProfX.connect()
+    #BasicInterface()
 
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
@@ -445,6 +445,9 @@ try:
     #tp_NPEX.retrieve_NPEX_data("A,21.7784000.W")
 
     #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
+
+    Samples = ["A,21.0600663.Q", "A,21.0656002.J", "A,21.7765804.Z", "A,21.7765990.P", "A,21.7775446.W"]
+    tp_NPEX.retrieve_NPEX_samples(Samples)
 
 except Exception as e: 
     logging.error(e)
