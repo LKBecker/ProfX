@@ -7,7 +7,8 @@
 *.pyc
 *.xlsx
 config.py
-config_apex.py
+apex_config.py
 tests.py
 *.html
 *_files/*
+*.docx
