@@ -1,9 +1,5 @@
-#
+#GPL-3.0-or-later
 
-"""TODO:
-    Move parse_raw_ansi() into Screen and figure out how to send() from there.
-
-"""
 import config
 import getpass
 import logging
@@ -102,49 +98,45 @@ class RawANSICommand():
         'B':'Cursor Down',
         'C':'Cursor Forward',
         'D':'Cursor Back',
-        'E':'Cursor Next Line',
-        'F':'Cursor Previous Line',
-        'G':'Cursor Horizontal Absolute',
-        'H':'Set Cursor Position',
-        'J':'Erase in Display',
-        'K':'Erase in Line',
+        'E':'CNL',
+        'F':'CPL',
+        'G':'CHA',
+        'H':'SCP',
+        'J':'EiD',
+        'K':'EiL',
         'R':'DSR Response',
         'S':'Scroll Up',
         'T':'Scroll Down',
-        'f':'Set Horizontal Vertical Position',
-        'm':'Select Graphic Rendition',
+        'f':'SHVP',
+        'm':'SGR',
         'i':'AUX Port',
-        'n':'Device Status Report',
+        'n':'DSR',
         'tmessage': "PowerTerm Popup",
         'X' : "Self-appended chunk - telnet read wrong?"
         }
 
-    def __init__(self, byte1, byte2, byte3, command, text, is_private=False):
-        self.private_sequence = is_private
-        #Private sequences with non-numeric bytes are announced through final or parameter bytes in certain ranges:
-        if command:
-            if (ord(command[0]) >= RawANSICommand.ORD_FINAL_PRIVSEQ_MIN) & (ord(command[0]) <= RawANSICommand.ORD_FINAL_PRIVSEQ_MAX):
-                self.private_sequence = True
+    #TODO: not currently fit for purpose. Needs to...
+    #Have a progressive parser? Like, iterate through the body of the tag (everything not text; redefine)
+    def __init__(self, byte1, byte2, byte3, cmd, text, is_private=False):
+        def try_numeric(item):
+            try:
+                return int(item) if item else 0
+            except:
+                return item
+                #return int(hex(ord(item)).lstrip("0x")) #TODO: repent for this
+                #TODO: honestly why not just store the raw value of the byte and then convert to a bsae10 number when you expect a number
 
-        if byte1:    
-            if (ord(byte1[0]) >= RawANSICommand.ORD_PARAM_PRIVSEQ_MIN) & (ord(byte1[0]) <= RawANSICommand.ORD_PARAM_PRIVSEQ_MAX):
-                self.private_sequence = True
-
-        if self.private_sequence == False:
-            self.b1 = int(byte1) if byte1 else 0
-            self.b2 = int(byte2) if byte1 else 0
-            self.b3 = int(byte3) if byte1 else 0
-            self.cmdByte = command
-            self.cmd = RawANSICommand.Commands[self.cmdByte]
-        else:
-            self.cmdByte = byte1
-            self.b1 = command
-            self.b2 = 0
-            self.b3 = 0
-            self.cmd = "Private Sequence" #TODO: Reconsider
-        
+        self.b1 = try_numeric(byte1)
+        self.b2 = try_numeric(byte2)
+        self.b3 = try_numeric(byte3)
+        self.cmdByte = cmd
         self.txt = text
-    
+
+        try:
+            self.cmd = RawANSICommand.Commands[self.cmdByte]
+        except KeyError:
+            self.cmd = f"[{hex(ord(self.cmdByte))}]"
+
     """Digests raw text into the ANSI command and the included text."""
     @staticmethod
     def from_text(text):
@@ -189,7 +181,6 @@ class Screen(): #TODO: does this need to be a class?
         self.hasErrors      = False
         self.CursorRow      = 0
         self.CursorCol      = 0
-        self.recognise_type = config.LOCALISATION.identify_screen
         self.Connection     = Connection
 
     def __str__(self):
@@ -197,6 +188,9 @@ class Screen(): #TODO: does this need to be a class?
 
     def __repr__(self): 
         return (f"Screen({len(self.Lines)} lines, {len(self.ParsedANSI)} ANSI chunks)")
+
+    def recognise_type(self):
+        raise Exception("This base method should have been overridded using an appropriate, LIMS-specific method!")
 
     @staticmethod
     def prevScreen():
@@ -230,9 +224,9 @@ class Screen(): #TODO: does this need to be a class?
     def parse_raw_ANSI(self, workingText):
         _ParsedANSI       = []
         if workingText == b'\x05':
-            self.Connection.write(config.LOCALISATION.ANSWERBACK)
+            self.Connection.write(self.Connection.TerminalType)
             return
-        workingText         = workingText.decode("ASCII")
+        workingText         = workingText.decode("ASCII").lstrip()
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
         if (firstANSICodePos > 0): 
@@ -241,8 +235,8 @@ class Screen(): #TODO: does this need to be a class?
             workingText = workingText[firstANSICodePos:]
 
         RawANSI = Connection.EscapeSplitter.split(workingText)       #split remaining text into <^[byte;byte;bytecmdText>tokens
-        RawANSI = [x for x in RawANSI if x != ""]
-        RawANSI = [RawANSICommand.from_text(x) for x in RawANSI if x != ""]
+        RawANSI = [x for x in RawANSI if x]
+        RawANSIComms = [RawANSICommand.from_text(x) for x in RawANSI]
         
         #Local variables to cache ANSI code instructions for text, and transcribe them into ParsedANSICommands:
         currentLine   = 1
@@ -250,7 +244,7 @@ class Screen(): #TODO: does this need to be a class?
         #currentColor  = "bold;bg blue;fg green" #APEX default
         highlighted   = False
         
-        for RawANSIChunk in RawANSI:
+        for RawANSIChunk in RawANSIComms:
             #print ("processing %s (%s)" % (RawANSIChunk, RawANSIChunk.cmdByte))
             if RawANSIChunk.cmdByte == 'H':                #Set Cursor Position
                 currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting
@@ -304,7 +298,7 @@ class Screen(): #TODO: does this need to be a class?
 
     def save(self):
         self.Text = "\n".join(self.Lines)
-        self.recognise_type(self)
+        self.recognise_type()
         Screen.History.append(self)
         Screen.History = Screen.History[0: min(len(Screen.History), Screen.HISTORY_LENGTH)]
 
@@ -380,6 +374,7 @@ class Connection():
         self.LASTCMD             = b""               # stores last option being called, for purposes of knowing what subnegotiation to do (because telnetlib chops that up)
         self.textBuffer          = b""               # stores whatever was received from the socket.
         self.Screen              = Screen(self.tn)
+        self.TerminalType        = b'VT100\x0D'
 
     """ Handles TELNET option negotiation """
     def set_options(self, tsocket, command, option):
@@ -464,7 +459,8 @@ class Connection():
         self.send(msg, quiet, readEcho)   # 
         self.tn.read_very_eager()         # Take and ignore all data being returned in response to this message
 
-    def connect(self, IP, Port:int=23, IBMUser:str="AIX", Userprompt:str=None, User:str=None, PWPrompt:str=None, PW:str=None):
+    def connect(self, IP, Port:int=23, IBMUser:str="AIX", TerminalID:bytes=b"CHM\x0D", Userprompt:str=None, User:str=None, PWPrompt:str=None, PW:str=None):
+        self.TerminalType = TerminalID 
         if Userprompt and not User:
             telnetLogger.error("connect(): A Userprompt but no user has been supplied. Cannot aupply user if asked by remote host. Terminating.")
             raise Exception("connect(): Userprompt but no User supplied")
@@ -481,7 +477,9 @@ class Connection():
         self.send(IBMUser)
         telnetLogger.debug("Connected to remote. Waiting for login...")
         self.tn.read_until(b'\x05')
-        self.tn.write(config.LOCALISATION.ANSWERBACK)
+        self.tn.write(self.TerminalType)
+        #TODO: be ready for invalid Terminal ID; make up/use a different one.
+
         #TODO: double check you can't still read until User THEN PW.
         #Or, get a user-supplied one, and if none, skip that part (and write at the other.)
         if Userprompt:

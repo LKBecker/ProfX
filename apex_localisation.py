@@ -5,8 +5,14 @@ from typing import Callable
 
 @dataclasses.dataclass
 class APEX_Commands:
+    LIMS_IP:str
+    LIMS_PORT:int
+    LIMS_USER:str
+    LIMS_PW:str
     IBM_USER: str
     ANSWERBACK: str
+    NPEX_USER:str
+    NPEX_PW:str
     CANCEL_ACTION: str
     NA: str
     RELEASE: str
@@ -17,5 +23,5 @@ class APEX_Commands:
     OUTSTANDING_WORK: str
     OVERDUE_SAMPLES: str
     OVERDUE_AUTOMATION: str
-    check_main_screen: Callable
+    identify_screen: Callable
     check_sample_id: Callable

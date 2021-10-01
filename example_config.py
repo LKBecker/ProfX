@@ -50,7 +50,7 @@ LOCALISATION = TelePath_Commands(
     RELEASE="R",                                # Command to release a set
     EMPTYSTR="",                                # Empty string, used to return to previous menu
     CANCEL_ACTION="^",                          # 'escape' command, cancels current action/returns to prev. screen. IMPORTANT.
-    identify_screen=your_screen_check,   # This function receives the whole screen's lines, and returns True if the screen is the main screen.
+    identify_screen=your_screen_check,          # This function receives the Screen and assigns its Type, OptionStr, Options, and DefaultOption
     check_sample_id=your_sample_check           # This function receives a sample ID and returns True if it's valid. Can just always return true if there is no check.
 )
 

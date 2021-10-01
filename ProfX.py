@@ -10,13 +10,14 @@ import datastructs
 import datetime
 import getpass
 import logging
-from telnet_ANSI import Connection
+import telnet_ANSI
 import npex
 import re
 import time
 import utils
 
-TelePath = Connection()
+TelePath = telnet_ANSI.Connection()
+telnet_ANSI.Screen.recognise_type = config.LOCALISATION.identify_screen
 
 UseTrainingSystem = False
 
