@@ -4,14 +4,13 @@
     Move parse_raw_ansi() into Screen and figure out how to send() from there.
 
 """
-
+import config
 import getpass
 import logging
 import re
 import struct
 import telnetlib
 import time
-import config
 
 telnetLogger = logging.getLogger(__name__)
 
@@ -173,26 +172,47 @@ class RawANSICommand():
 
 
 """Virtual screen, on which ParsedANSICommands are assembled into their final shape."""
-class Screen():
-    def __init__(self):
-        self.ParsedANSI     = []    # The parsed ANSI instructions, whose execution will create the current screen from self.lastScreen
-        self.Lines          = []    # The result of applying all the instructions in self.ParsedANSI to self.lastScreen
-        self.Text           = ""    # The screen as a single multi-line text string
-        self.Type           = ""    # The type of screen, usually indiated by the text on line 1
-        self.Options        = []    # The final line of the screen tends to tell users how to proceed
+class Screen(): #TODO: does this need to be a class?
+    History = []
+    HISTORY_LENGTH = 5
+
+    def __init__(self, Connection, BasedOnPrev=True):
+        self.BasedOnPrev    = BasedOnPrev
+        self.ParsedANSI     = []        # The parsed ANSI instructions, whose execution will create the current screen from self.lastScreen
+        self.Lines          = []        # The result of applying all the instructions in self.ParsedANSI to self.lastScreen
+        self.Text           = ""        # The screen as a single multi-line text string
+        self.Type           = "UNKNOWN" # The type of screen, usually indiated by the text on line 1
+        self.Options        = []        # The final line of the screen tends to tell users how to proceed
         self.OptionStr      = ""
-        self.DefaultOption  = "^"   # This includes a default option
+        self.DefaultOption  = "^"       # This includes a default option
         self.Errors         = []
         self.hasErrors      = False
         self.CursorRow      = 0
         self.CursorCol      = 0
-        self.prevScreen     = None
+        self.recognise_type = config.LOCALISATION.identify_screen
+        self.Connection     = Connection
 
     def __str__(self):
         return (self.Text)
 
     def __repr__(self): 
         return (f"Screen({len(self.Lines)} lines, {len(self.ParsedANSI)} ANSI chunks)")
+
+    @staticmethod
+    def prevScreen():
+        return Screen.History[-1]
+
+    @staticmethod
+    def prevLines():
+        return Screen.History[-1].Lines
+
+    @property
+    def cursorPosition(self):
+        return (self.CursorRow, self.CursorCol)
+
+    @property
+    def length(self):
+        return len(self.Lines)
 
     @staticmethod
     def chunk_or_none(chunks, line, column, highlighted=None):
@@ -207,45 +227,90 @@ class Screen():
             return _chunk[0].text
         return None
 
-    def recognise_type(self):
-        #TODO: patch via Localisation
-
-        self.Type = "UNKNOWN"
-        if len(self.Lines) <2 : 
-            telnetLogger.warning("Screen has less than two lines?")
+    def parse_raw_ANSI(self, workingText):
+        _ParsedANSI       = []
+        if workingText == b'\x05':
+            self.Connection.write(config.LOCALISATION.ANSWERBACK)
             return
-        IDLine = self.Lines[1].strip()
-        #IDLineSplit = IDLine.split(" ")
-        #self.OptionStr = self.Lines[-1].strip()
-        #self.Options = [x.strip() for x in self.OptionStr.split("\\") if x != ""]
-        #tmp = re.match(".*\<([A-Z]+)\>.*$", self.Options[-1]) #Last option has a default in it, which the \\ split will not have removed
-        #Default options in apex are indicated by capitals and highlighting
-        #e.g. get highlighted chunks in where line==max(line) and len(text)==1
+        workingText         = workingText.decode("ASCII")
+        firstANSICodePos    = workingText.find('\x1b[')
+        if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
+        if (firstANSICodePos > 0): 
+            telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code")
+            telnetLogger.debug(f"Raw text is '{workingText}'")
+            workingText = workingText[firstANSICodePos:]
 
-        #if (tmp): 
-        #    self.DefaultOption = tmp.group(1)
-        #    tmp = self.Options[-1]
-        #    self.Options[-1] = tmp[:tmp.find('<')-1].strip()
-        if not IDLine: 
-            telnetLogger.debug("Screen does not have an ID line; Check for error / merge problem?")
-            self.Type = "ERROR/NO ID LINE"
-            return
-        Local_Main_Menu = config.LOCALISATION.check_main_screen(self.Lines)
-        if Local_Main_Menu:
-            self.Type= "MainMenu"
-     
-        if self.Type == "UNKNOWN": telnetLogger.warning("Could not identify screen '%s'" % IDLine)
-        telnetLogger.debug("Screen type is <%s>" % (self.Type))
- 
+        RawANSI = Connection.EscapeSplitter.split(workingText)       #split remaining text into <^[byte;byte;bytecmdText>tokens
+        RawANSI = [x for x in RawANSI if x != ""]
+        RawANSI = [RawANSICommand.from_text(x) for x in RawANSI if x != ""]
+        
+        #Local variables to cache ANSI code instructions for text, and transcribe them into ParsedANSICommands:
+        currentLine   = 1
+        currentColumn = 1
+        #currentColor  = "bold;bg blue;fg green" #APEX default
+        highlighted   = False
+        
+        for RawANSIChunk in RawANSI:
+            #print ("processing %s (%s)" % (RawANSIChunk, RawANSIChunk.cmdByte))
+            if RawANSIChunk.cmdByte == 'H':                #Set Cursor Position
+                currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting
+                #currentColumn   = RawANSIChunk.b2 - 1      # Same as above but for columns, though some SCP columns do start at 0!
+                currentColumn   = RawANSIChunk.b2      # Same as above but for columns, though some SCP columns do start at 0!
+                                
+            elif RawANSIChunk.cmdByte == 'm':              #Select Graphic Rendition
+                #if RawANSIChunk.b1 == 1:   currentColor  = "bold;"
+                #else:               currentColor  = "undefined;"
+                #if RawANSIChunk.b2 == 44:  currentColor += "bg blue;"
+                #else:               currentColor += "undefined;"
+                #if RawANSIChunk.b3 == 32:  currentColor += "fg green;"
+                #if RawANSIChunk.b3 == 37:  currentColor += "fg white;"
+                if RawANSIChunk.b3 == 32:  highlighted = False #Let's keep it simple for now, APEX style only.
+                elif RawANSIChunk.b3 == 37:  highlighted = True
+                
+            elif RawANSIChunk.cmdByte == 'J': #Erase in Display 
+                if RawANSIChunk.b1 > 2: telnetLogger.error("Encountered an Erase in Display command with a byte1 value greater than 2 in RawANSI.parse(). This violates the ANSI standard; check parsing")
+                _delRawANSIChunk = ParsedANSICommand(currentLine, max(currentColumn,0), "", False, 2, RawANSIChunk.b1) # If RawANSIChunk.txt isn't nothing, we will append a 'fake' textRawANSIChunk lower down.
+                _ParsedANSI.append(_delRawANSIChunk)
+
+            elif RawANSIChunk.cmdByte == 'K': #Erase in Line
+                #Erases part of the line. If n is 0 (or missing), clear from cursor to the end of the line. 
+                #If n is 1, clear from cursor to beginning of the line. 
+                #If n is 2, clear entire line. Cursor position does not change.
+                _delRawANSIChunk = ParsedANSICommand(line=currentLine, column=currentColumn, text="", highlighted=highlighted, deleteMode=1, deleteTarget=RawANSIChunk.b1)
+                _ParsedANSI.append(_delRawANSIChunk)
+            
+            elif RawANSIChunk.cmdByte == 'tmessage': 
+                telnetLogger.warning("Received PowerTerm tmessage, args '%s'" % RawANSIChunk.txt)
+                _tRawANSIChunk = ParsedANSICommand(0, 0, RawANSIChunk.txt, False, 0, 0, True) #RawANSIChunk.txt contains the parameters of the tmessage function call
+                _ParsedANSI.append(_tRawANSIChunk)
+                continue
+
+            elif RawANSIChunk.cmdByte == '?25':
+                pass
+
+            else: telnetLogger.debug(f"Error: RawANSI.parseToText() has no specific code to handle ANSI code '{RawANSIChunk.cmdByte}' ({RawANSIChunk.cmd}).")
+
+            if RawANSIChunk.txt: #position/color changes will have already been performed at this point, and apply to any subsequent RawANSIChunks due to being stored in local variables.
+                #Making this test dependent on text len ensures nothing gets missed
+                _tRawANSIChunk = ParsedANSICommand(line=currentLine, column=currentColumn, text=RawANSIChunk.txt, highlighted=highlighted, deleteMode=0, deleteTarget=0)
+                #print(f"appending RawANSIChunk <{_tRawANSIChunk}>"
+                _ParsedANSI.append(_tRawANSIChunk)
+                currentColumn += len(RawANSIChunk.txt) #if the next RawANSIChunk does not reset position (e.g. cursor move), we need to keep up ourselves. 
+        self.ParsedANSI = _ParsedANSI
+
+    def from_text(self, text:str):
+        self.parse_raw_ANSI(text)
+        self.render()
+
+    def save(self):
+        self.Text = "\n".join(self.Lines)
+        self.recognise_type(self)
+        Screen.History.append(self)
+        Screen.History = Screen.History[0: min(len(Screen.History), Screen.HISTORY_LENGTH)]
+
     def render(self):
-        def save_screen(self:Screen):
-            self.Text = "\n".join(self.Lines)
-            Connection.prevScreen = self.Lines
-            Connection.screenHistory.append(self)
-            Connection.screenHistory = Connection.screenHistory[0: min(len(Connection.screenHistory), Connection.SCREEN_HISTORY_LENGTH)]
-            self.recognise_type()
-
-        if (Connection.prevScreen is not None): self.Lines = Connection.prevScreen #Retrieve previous screen, which ANSI commands may alter
+        if len(Screen.History)>0: 
+            if self.BasedOnPrev: self.Lines = Screen.prevLines() #Retrieve previous screen, which ANSI commands may alter
         for currentIndex in range(0, len(self.ParsedANSI)):
             ANSICmd = self.ParsedANSI[currentIndex]
             self.CursorCol = ANSICmd.column
@@ -286,12 +351,9 @@ class Screen():
                         continue
                     
                     if(ANSICmd.deleteTarget == 2): #Wipe whole screen
-                        #TODO: Append anything until now, THEN DESTRY
-                        save_screen(self)
-                        subScreen = Screen()
-                        subScreen.ParsedANSI = self.ParsedANSI[currentIndex+1:]
-                        subScreen.render()
-                        return
+                        #Just wipe .Lines and keep going
+                        self.Lines = []
+                        continue
       
             #Ensure implicit whitespace exists
             if (len(self.Lines[ANSICmd.line]) < ANSICmd.column):  self.Lines[ANSICmd.line] += (" "*(ANSICmd.column - len(self.Lines[ANSICmd.line])))
@@ -301,30 +363,7 @@ class Screen():
             else: 
                 self.Lines[ANSICmd.line] += ANSICmd.text #else, we can just append
 
-        save_screen(self)
-
-    @property
-    def cursorPosition(self):
-        return (self.CursorRow, self.CursorCol)
-
-    @property
-    def length(self):
-        return len(self.Lines)
-
-    @staticmethod
-    def from_text(text:str):
-        newScreen = Screen()
-        newScreen.ParsedANSI = Connection.parse_raw_ANSI(text)
-        newScreen.render()
-        return newScreen
-
-    def restore_previous(self):
-        if self.prevScreen is not None: 
-            self.Lines = self.prevScreen.Lines
-            self.Text = "\n".join(self.Lines)
-        else:
-            self.Lines = []
-            self.Text = ""
+        self.save()
 
 
 class Connection():
@@ -333,18 +372,14 @@ class Connection():
     MAX_WINDOW_WIDTH    = 128               # Max Value: 65535
     MAX_WINDOW_HEIGHT   = 5000              # 
     TERMINALS           = [b"", b"VT100", b"VT102", b"NETWORK-VIRTUAL-TERMINAL", b"UNKNWN"] #A list of the different terminal types we're willing to lie and pretend we are
-    SCREEN_HISTORY_LENGTH = 10
     EscapeSplitter = re.compile(r"(?=\x1b)", flags=re.M)
 
-    def __init__(self, Answerback=b'VT100\x0D'):
+    def __init__(self):
         self.tn = telnetlib.Telnet()
         self.TERMCOUNTER         = 1                 # keeps track of how many terminal types we're already tried.
         self.LASTCMD             = b""               # stores last option being called, for purposes of knowing what subnegotiation to do (because telnetlib chops that up)
         self.textBuffer          = b""               # stores whatever was received from the socket.
-        self.prevScreen          = None              # Holds previous screens (ANSI data without an explicit WIPE SCREEN is an edit to a previous screen)
-        self.Screen              = Screen()
-        self.screenHistory       = []
-        self.Answerback          = Answerback
+        self.Screen              = Screen(self.tn)
 
     """ Handles TELNET option negotiation """
     def set_options(self, tsocket, command, option):
@@ -382,79 +417,7 @@ class Connection():
         elif command in (telnetlib.DO, telnetlib.DONT): tsocket.send(telnetlib.IAC + telnetlib.WONT + option) 
         #We refuse to do anything else
         elif command in (telnetlib.WILL, telnetlib.WONT): tsocket.send(telnetlib.IAC + telnetlib.DONT + option) 
-        #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY.
-
-    def parse_raw_ANSI(self, workingText=None):
-        if not workingText:
-            workingText = self.textBuffer.decode("ASCII").lstrip()
-        ParsedANSI       = []
-        if workingText == "\x05":
-            self.send(self.Answerback)
-            return
-        firstANSICodePos    = workingText.find('\x1b[')
-        if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
-        if (firstANSICodePos > 0): 
-            telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code")
-            telnetLogger.debug(f"Raw text is '{workingText}'")
-            workingText = workingText[firstANSICodePos:]
-
-        RawANSI = Connection.EscapeSplitter.split(workingText)       #split remaining text into <^[byte;byte;bytecmdText>tokens
-        RawANSI = [x for x in RawANSI if x != ""]
-        RawANSI = [RawANSICommand.from_text(x) for x in RawANSI if x != ""]
-        
-        #Local variables to cache ANSI code instructions for text, and transcribe them into ParsedANSICommands:
-        currentLine   = 1
-        currentColumn = 1
-        #currentColor  = "bold;bg blue;fg green" #APEX default
-        highlighted   = False
-        
-        for RawANSIChunk in RawANSI:
-            #print ("processing %s (%s)" % (RawANSIChunk, RawANSIChunk.cmdByte))
-            if RawANSIChunk.cmdByte == 'H':                #Set Cursor Position
-                currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting
-                #currentColumn   = RawANSIChunk.b2 - 1      # Same as above but for columns, though some SCP columns do start at 0!
-                currentColumn   = RawANSIChunk.b2      # Same as above but for columns, though some SCP columns do start at 0!
-                                
-            elif RawANSIChunk.cmdByte == 'm':              #Select Graphic Rendition
-                #if RawANSIChunk.b1 == 1:   currentColor  = "bold;"
-                #else:               currentColor  = "undefined;"
-                #if RawANSIChunk.b2 == 44:  currentColor += "bg blue;"
-                #else:               currentColor += "undefined;"
-                #if RawANSIChunk.b3 == 32:  currentColor += "fg green;"
-                #if RawANSIChunk.b3 == 37:  currentColor += "fg white;"
-                if RawANSIChunk.b3 == 32:  highlighted = False #Let's keep it simple for now, APEX style only.
-                elif RawANSIChunk.b3 == 37:  highlighted = True
-                
-            elif RawANSIChunk.cmdByte == 'J': #Erase in Display 
-                if RawANSIChunk.b1 > 2: telnetLogger.error("Encountered an Erase in Display command with a byte1 value greater than 2 in RawANSI.parse(). This violates the ANSI standard; check parsing")
-                _delRawANSIChunk = ParsedANSICommand(currentLine, max(currentColumn,0), "", False, 2, RawANSIChunk.b1) # If RawANSIChunk.txt isn't nothing, we will append a 'fake' textRawANSIChunk lower down.
-                ParsedANSI.append(_delRawANSIChunk)
-
-            elif RawANSIChunk.cmdByte == 'K': #Erase in Line
-                #Erases part of the line. If n is 0 (or missing), clear from cursor to the end of the line. 
-                #If n is 1, clear from cursor to beginning of the line. 
-                #If n is 2, clear entire line. Cursor position does not change.
-                _delRawANSIChunk = ParsedANSICommand(line=currentLine, column=currentColumn, text="", highlighted=highlighted, deleteMode=1, deleteTarget=RawANSIChunk.b1)
-                ParsedANSI.append(_delRawANSIChunk)
-            
-            elif RawANSIChunk.cmdByte == 'tmessage': 
-                telnetLogger.warning("Received PowerTerm tmessage, args '%s'" % RawANSIChunk.txt)
-                _tRawANSIChunk = ParsedANSICommand(0, 0, RawANSIChunk.txt, False, 0, 0, True) #RawANSIChunk.txt contains the parameters of the tmessage function call
-                ParsedANSI.append(_tRawANSIChunk)
-                continue
-
-            elif RawANSIChunk.cmdByte == '?25':
-                pass
-
-            else: telnetLogger.debug(f"Error: RawANSI.parseToText() has no specific code to handle ANSI code '{RawANSIChunk.cmdByte}' ({RawANSIChunk.cmd}).")
-
-            if RawANSIChunk.txt: #position/color changes will have already been performed at this point, and apply to any subsequent RawANSIChunks due to being stored in local variables.
-                #Making this test dependent on text len ensures nothing gets missed
-                _tRawANSIChunk = ParsedANSICommand(line=currentLine, column=currentColumn, text=RawANSIChunk.txt, highlighted=highlighted, deleteMode=0, deleteTarget=0)
-                #print(f"appending RawANSIChunk <{_tRawANSIChunk}>"
-                ParsedANSI.append(_tRawANSIChunk)
-                currentColumn += len(RawANSIChunk.txt) #if the next RawANSIChunk does not reset position (e.g. cursor move), we need to keep up ourselves. 
-        return ParsedANSI
+        #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY. 
 
     def read_data(self, max_wait = 200, ms_input_wait = 100, wait = True): #HACK: 100 / 50?
         self.textBuffer = self.tn.read_very_eager() #very_eager never blocks, only returns data stripped of all TELNET control codes, negotiation, etc                              
@@ -468,8 +431,9 @@ class Connection():
                 waited = waited + ms_input_wait     # count wait time
                 tmp = self.tn.read_very_eager()   # try reading again
         if self.textBuffer:
-            self.screen = Screen.from_text(self)
-            telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.screen.ParsedANSI))
+            self.Screen.from_text(self.textBuffer)
+            self.Screen = Screen.History[-1]
+            telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.Screen.ParsedANSI))
 
     def send_raw(self, message, quiet=False, readEcho=True):
         try:
@@ -517,7 +481,7 @@ class Connection():
         self.send(IBMUser)
         telnetLogger.debug("Connected to remote. Waiting for login...")
         self.tn.read_until(b'\x05')
-        self.tn.write(self.Answerback)
+        self.tn.write(config.LOCALISATION.ANSWERBACK)
         #TODO: double check you can't still read until User THEN PW.
         #Or, get a user-supplied one, and if none, skip that part (and write at the other.)
         if Userprompt:

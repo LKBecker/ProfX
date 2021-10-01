@@ -2,7 +2,7 @@
 
 import datetime
 from tp_telnet import ProfX, Screen
-from tp_utils import process_whitespaced_table, extract_column_widths
+from utils import process_whitespaced_table, extract_column_widths
 import time
 
 import config

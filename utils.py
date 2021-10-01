@@ -36,3 +36,9 @@ def timestamp(fileFormat=False):
     if fileFormat:
         return datetime.datetime.now().strftime("%y%m%d_%H%M")
     return datetime.datetime.now().strftime("%y-%m-%d %H:%M")
+
+""" Utility function, testing for truth, otherwise returning None"""
+def value_or_none(item):
+    if item:
+        return item
+    return None

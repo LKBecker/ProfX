@@ -1,7 +1,6 @@
 #GPL-3.0-or-later
 
 import config
-from tp_structs import Specimen, SampleID
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode, quote_plus
 from utils import timestamp
@@ -46,7 +45,7 @@ def get_NPEX_login():
     #Is NPEX_SESSION currnet/acitve? if no...
     npexLogger.info("get_NPEX_login(): Opening session.")
     NPEX_SESSION.get("https://lab2lab.xlab.this.nhs.uk/login")
-    payload = {"username": config.NPEX_USER, "password": config.NPEX_PW, "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']}
+    payload = {"username": config.LOCALISATION.NPEX_USER, "password": config.LOCALISATION.NPEX_PW, "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']}
     npexLogger.info("Logging into NPEX Web interface...")
     result = NPEX_SESSION.post(NPEX_LOGIN_LINK, payload)
     if result.status_code == 200:
@@ -97,13 +96,13 @@ def retrieve_NPEX_data(SampleID: str):
             raise Exception(f"retrieve_NPEX_data(): 400 BAD REQUEST for sample {SampleID}.")
         if SampleData.status_code == 403:
             npexLogger.error(f"retrieve_NPEX_data(): NPEX answered with code [403 FORBIDDEN]. Check login details and retry.")
-            raise Exception(f"retrieve_NPEX_data(): 403 FORBIDDEN for user {config.NPEX_USER}.")
+            raise Exception(f"retrieve_NPEX_data(): 403 FORBIDDEN for user {config.LOCALISATION.NPEX_USER}.")
         if SampleData.status_code == 404:
             npexLogger.info(f"retrieve_NPEX_data(): NPEX answered with code [404 NOT FOUND]. Your sample does not exist on NPEX.")
             return NPEXSample
         else:
             npexLogger.info(f"retrieve_NPEX_data(): NPEX answered with code [{SampleData.status_code}]. Your request could not be compledted.")
-            raise Exception(f"retrieve_NPEX_data(): [{SampleData.status_code}] for sample [{SampleID}], user [{config.NPEX_USER}].")
+            raise Exception(f"retrieve_NPEX_data(): [{SampleData.status_code}] for sample [{SampleID}], user [{config.LOCALISATION.NPEX_USER}].")
 
     
 

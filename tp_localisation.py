@@ -4,9 +4,15 @@ import dataclasses
 from typing import Callable
 
 @dataclasses.dataclass
-class Commands:
+class TelePath_Commands:
+    LIMS_IP:str
+    LIMS_PORT:int
+    LIMS_USER:str
+    LIMS_PW:str
     IBM_USER: str
     ANSWERBACK: str
+    NPEX_USER:str
+    NPEX_PW:str
     PATIENTENQUIRY: str
     SPECIMENENQUIRY: str
     UPDATE_SET_RESULT:str
@@ -26,5 +32,5 @@ class Commands:
     RELEASE: str
     EMPTYSTR: str
     QUIT: str
-    check_main_screen: Callable
+    identify_screen: Callable
     check_sample_id: Callable
