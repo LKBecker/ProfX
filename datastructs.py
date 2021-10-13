@@ -5,13 +5,13 @@ import config
 import datetime
 from itertools import chain
 import logging
-import matplotlib.pyplot as plt
-import matplotlib as mpl
+#import matplotlib.pyplot as plt
+#import matplotlib as mpl
 import utils
-plt.style.use('ggplot')
-font = {'family' : 'monospace',
-        'size'   : 8}
-plt.rc('font', **font)  # pass in the font dict as kwargs
+#plt.style.use('ggplot')
+#font = {'family' : 'monospace',
+#        'size'   : 8}
+#plt.rc('font', **font)  # pass in the font dict as kwargs
 
 import os.path
 import time

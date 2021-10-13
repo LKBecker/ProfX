@@ -16,8 +16,8 @@ import re
 import time
 import utils
 
-TelePath = telnet_ANSI.Connection()
-telnet_ANSI.Screen.recognise_type = config.LOCALISATION.identify_screen
+telnet_ANSI.Connection.recognise_Screen_type = config.LOCALISATION.identify_screen
+TelePath = telnet_ANSI.Connection(Answerback=config.LOCALISATION.ANSWERBACK)
 
 UseTrainingSystem = False
 
@@ -153,7 +153,7 @@ class tp_Specimen(datastructs.Specimen):
         TelePath.read_data()
         TelePath.send(self.ID)
         TelePath.read_data()
-        self.from_chunks(TelePath.Screen.ParsedANSI)
+        self.from_chunks(TelePath.ParsedANSI)
 
     def from_chunks(self, ANSIChunks:list):
         if len(ANSIChunks)==0:
@@ -164,16 +164,16 @@ class tp_Specimen(datastructs.Specimen):
         else:
             LastRetrieveIndex = 0
         DataChunks = sorted([x for x in ANSIChunks[LastRetrieveIndex+1:] if x.highlighted and x.deleteMode == 0 and x.line != 6])
-        #get the LAST item that mentions the sample ID, which should be the TelePath.Screen refresh after "Retrieving data..."
+        #get the LAST item that mentions the sample ID, which should be the TelePath refresh after "Retrieving data..."
                 
-        self._ID                = tp_SpecimenID(TelePath.Screen.chunk_or_none(DataChunks, line = 3, column = 17))
-        self.PatientID          = TelePath.Screen.chunk_or_none(DataChunks, line = 8, column = 1)
+        self._ID                = tp_SpecimenID(TelePath.chunk_or_none(DataChunks, line = 3, column = 17))
+        self.PatientID          = TelePath.chunk_or_none(DataChunks, line = 8, column = 1)
         #TODO: put into PATIENT object (Search for existing patient, if not make new for Registration)
         #TODO: get patient ID (registration)
 
-        self.LName              = TelePath.Screen.chunk_or_none(DataChunks, line = 8, column = 21)
-        self.FName              = TelePath.Screen.chunk_or_none(DataChunks, line = 8, column = 35)
-        self.DOB                = TelePath.Screen.chunk_or_none(DataChunks, line = 8, column = 63)
+        self.LName              = TelePath.chunk_or_none(DataChunks, line = 8, column = 21)
+        self.FName              = TelePath.chunk_or_none(DataChunks, line = 8, column = 35)
+        self.DOB                = TelePath.chunk_or_none(DataChunks, line = 8, column = 63)
         if self.DOB:
             if "-" in self.DOB:
                 _DOB = self.DOB.split("-")
@@ -198,13 +198,13 @@ class tp_Specimen(datastructs.Specimen):
                 _Patient = tp_Patient.Storage[self.PatientID]
             _Patient.add_sample(self)
         
-        self.Collected          = tp_Specimen.parse_datetime_with_NotKnown(TelePath.Screen.chunk_or_none(DataChunks, line = 3, column = 67)) 
-        self.Received           = tp_Specimen.parse_datetime_with_NotKnown(TelePath.Screen.chunk_or_none(DataChunks, line = 4, column = 67))
-        self.Type               = TelePath.Screen.chunk_or_none(DataChunks, line = 5, column = 15)
-        self.Location           = TelePath.Screen.chunk_or_none(DataChunks, line = 9, column = 18)
-        self.Requestor          = TelePath.Screen.chunk_or_none(DataChunks, line = 9, column = 55)
-        self.Comment            = TelePath.Screen.chunk_or_none(DataChunks, line = 6, column = 16)
-        self.ReportComment      = TelePath.Screen.chunk_or_none(DataChunks, line = 4, column = 16)
+        self.Collected          = tp_Specimen.parse_datetime_with_NotKnown(TelePath.chunk_or_none(DataChunks, line = 3, column = 67)) 
+        self.Received           = tp_Specimen.parse_datetime_with_NotKnown(TelePath.chunk_or_none(DataChunks, line = 4, column = 67))
+        self.Type               = TelePath.chunk_or_none(DataChunks, line = 5, column = 15)
+        self.Location           = TelePath.chunk_or_none(DataChunks, line = 9, column = 18)
+        self.Requestor          = TelePath.chunk_or_none(DataChunks, line = 9, column = 55)
+        self.Comment            = TelePath.chunk_or_none(DataChunks, line = 6, column = 16)
+        self.ReportComment      = TelePath.chunk_or_none(DataChunks, line = 4, column = 16)
         
         TestStart = ANSIChunks.index([x for x in ANSIChunks if x.text == "Sets Requested :-"][0])
         for i in range(TestStart+3, len(ANSIChunks), 4):
@@ -264,11 +264,11 @@ class tp_Patient(datastructs.Patient):
         TelePath.read_data()
         TelePath.send(self.ID)
         TelePath.read_data()
-        if not TelePath.Screen.hasErrors:
+        if not TelePath.hasErrors:
             TelePath.send(self.LName[:2])
             TelePath.read_data()
-            if TelePath.Screen.hasErrors:
-                errMsg = TelePath.Screen.Errors[0]
+            if TelePath.hasErrors:
+                errMsg = TelePath.Errors[0]
                 errMsg = errMsg[len('"No match - Name on file is'):]
                 errMsg = errMsg[:errMsg.find('"')]
                 self.LName = errMsg
@@ -283,8 +283,8 @@ class tp_Patient(datastructs.Patient):
             TelePath.send('', readEcho=False) #ALL
             TelePath.read_data() #Get specimen table
             
-            while TelePath.Screen.DefaultOption == "N":
-                samples = utils.process_whitespaced_table(TelePath.Screen.Lines[14:-2], utils.extract_column_widths(TelePath.Screen.Lines[12]))
+            while TelePath.DefaultOption == "N":
+                samples = utils.process_whitespaced_table(TelePath.Lines[14:-2], utils.extract_column_widths(TelePath.Lines[12]))
                 if not extract_specimens(samples):
                     break
                 TelePath.send('N')
@@ -306,11 +306,11 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
     TelePath.send('0', quiet=True)        # Send output to screen, which in this case is then parsed as our input stream
     time.sleep(0.2)
     Samples = []
-    while TelePath.Screen.DefaultOption != "Q": # Parse overdue samples until there are none left to parse 
+    while TelePath.DefaultOption != "Q": # Parse overdue samples until there are none left to parse 
         TelePath.read_data()
-        #if (len(TelePath.Screen.Lines)>5):
-        if (TelePath.Screen.length > 5):        # #Presence of non-empty lines after four lines of header implies there are list members to parse
-            samples     = utils.process_whitespaced_table(TelePath.Screen.Lines[5:-2], utils.extract_column_widths(TelePath.Screen.Lines[3]))
+        #if (len(TelePath.Lines)>5):
+        if (TelePath.screenLength > 5):        # #Presence of non-empty lines after four lines of header implies there are list members to parse
+            samples     = utils.process_whitespaced_table(TelePath.Lines[5:-2], utils.extract_column_widths(TelePath.Lines[3]))
             for sample in samples: 
                 _Set = datastructs.TestSet(Sample=sample[3], SetIndex=None, SetCode=sample[5], TimeOverdue=sample[6], RequestedOn=sample[4])
                 if FilterSets:
@@ -320,7 +320,7 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
                 _Sample.LName = sample[2]
                 _Sample.Sets.append(_Set)
                 Samples.append(_Sample)
-        TelePath.send(TelePath.Screen.DefaultOption, quiet=True)
+        TelePath.send(TelePath.DefaultOption, quiet=True)
     TelePath.send('Q', quiet=True) #for completeness' sake, and so as to not block i guess
     if SetCode is not None: 
         Samples = [x for x in Samples if SetCode in x.SetCodes]
@@ -340,28 +340,28 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
 
     def extract_set_comments(SetToGet):
         TelePath.send('S', quiet=True)    # enter Set comments
-        while (TelePath.Screen.DefaultOption != 'B'):
+        while (TelePath.DefaultOption != 'B'):
             TelePath.read_data()
             CommStartLine = -1  # How many lines results take up varies from set to set!
-            PossCommStartLines = range(5, TelePath.Screen.length-1) #Comments start on the first line after line 5 that has *only* highlighted items in it.
+            PossCommStartLines = range(5, TelePath.screenLength-1) #Comments start on the first line after line 5 that has *only* highlighted items in it.
             for line in PossCommStartLines:
-                currentANSIs = [x for x in TelePath.Screen.ParsedANSI if x.line == line and x.deleteMode == 0]
+                currentANSIs = [x for x in TelePath.ParsedANSI if x.line == line and x.deleteMode == 0]
                 areHighlighted = [x.highlighted for x in currentANSIs]
                 if all(areHighlighted): #All elements on this line after line 5 are highlighted
                     CommStartLine = line    # thus, it is the line we want
                     break                   # and since we only need the first line that fulfills these criteria, no need to loop further
             if (CommStartLine != -1): 
                 SetToGet.Comments = []
-                for commentline in TelePath.Screen.Lines[CommStartLine:-2]:
+                for commentline in TelePath.Lines[CommStartLine:-2]:
                     if commentline.strip():
                         SetToGet.Comments.append(commentline.strip()) # Let's just slam it in there
-            TelePath.send(TelePath.Screen.DefaultOption, quiet=True) 
+            TelePath.send(TelePath.DefaultOption, quiet=True) 
         TelePath.read_data()
 
     def extract_results(SetToGet, SampleCollectionTime):
         logging.debug("complete_specimen_data_in_obj(): extract_results(): Downloading results for set %s" % SetToGet.Code)
-        SetHeaderWidths = utils.extract_column_widths(TelePath.Screen.Lines[6])
-        SetResultData = utils.process_whitespaced_table(TelePath.Screen.Lines[7:-2], SetHeaderWidths)
+        SetHeaderWidths = utils.extract_column_widths(TelePath.Lines[6])
+        SetResultData = utils.process_whitespaced_table(TelePath.Lines[7:-2], SetHeaderWidths)
     
         
         SetAuthUser = "[Not Authorized]"
@@ -374,17 +374,17 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                 SetIsAuthed = True
 
         if not SetIsAuthed:
-            AuthData = [x for x in TelePath.Screen.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
+            AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
             if AuthData:
                 if not AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
                     SetIsAuthed = True
         
         if SetIsAuthed:
-            SetAuthData = [x for x in TelePath.Screen.ParsedANSI if x.line == 4 and x.highlighted == True]
+            SetAuthData = [x for x in TelePath.ParsedANSI if x.line == 4 and x.highlighted == True]
             SetAuthData.sort()
             SetAuthUser = SetAuthData[1].text
             SetAuthTime = SetAuthData[0].text
-            SetRepData      = [x for x in TelePath.Screen.ParsedANSI if x.line == 5 and x.highlighted == True]
+            SetRepData      = [x for x in TelePath.ParsedANSI if x.line == 5 and x.highlighted == True]
             if SetRepData:
                     SetRepTime = SetRepData[0].text
         
@@ -410,7 +410,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     SampleCounter = 0
     nSamples = len(SampleObjs)
     ReportInterval = max(min(250, int(nSamples*0.1)), 1)
-
+    logging.info(f"complete_specimen_data_in_obj(): Beginning retrieval...")
     for Sample in SampleObjs: 
         if Sample.ID[:1] == "19":
             logging.info("complete_specimen_data_in_obj(): Avoiding specimen(s) from 2019, which can induce a crash on access.")    
@@ -421,12 +421,12 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             continue
         TelePath.send(Sample.ID, quiet=True)
         TelePath.read_data(max_wait=400)   # And read screen.
-        if (TelePath.Screen.hasErrors == True):
+        if (TelePath.hasErrors == True):
             # Usually the error is "No such specimen"; the error shouldn't be 'incorrect format' if we ran validate_ID().
-            logging.warning(f"complete_specimen_data_in_obj(): '%s'" % ";".join(TelePath.Screen.Errors))
+            logging.warning(f"complete_specimen_data_in_obj(): '%s'" % ";".join(TelePath.Errors))
         else:
             _SetCodes = Sample.SetCodes
-            Sample.from_chunks(TelePath.Screen.ParsedANSI)  #Parse sample data, including patient details, sets, and assigning tp_Specimen.Collected DT.
+            Sample.from_chunks(TelePath.ParsedANSI)  #Parse sample data, including patient details, sets, and assigning tp_Specimen.Collected DT.
             if FillSets == False:
                 Sample.Sets = [x for x in Sample.Sets if x.Code in _SetCodes]
 
@@ -434,12 +434,12 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                 if(Sample.hasNotepadEntries == True):
                     TelePath.send('N', quiet=True)  #Open tp_Specimen Notepad for this Sample
                     TelePath.read_data()
-                    if (TelePath.Screen.hasErrors == True):
-                        logging.warning("complete_specimen_data_in_obj(): Received error message when accessing specimen notepad for sample %s: %s" % (Sample, ";".join(TelePath.Screen.Errors)))
+                    if (TelePath.hasErrors == True):
+                        logging.warning("complete_specimen_data_in_obj(): Received error message when accessing specimen notepad for sample %s: %s" % (Sample, ";".join(TelePath.Errors)))
                         TelePath.send("", quiet=True)
                         tp_SpecimenNotepadEntries = [datastructs.SpecimenNotepadEntry(ID=Sample.ID, Author="[python]", Text="[Access blocked by other users, please retry later]", Index="0", Authored="00:00 1.1.70")]
                     else:
-                        tp_SpecimenNotepadEntries = [x for x in TelePath.Screen.ParsedANSI if x.line >= 8 and x.line <= 21 and x.deleteMode == 0]
+                        tp_SpecimenNotepadEntries = [x for x in TelePath.ParsedANSI if x.line >= 8 and x.line <= 21 and x.deleteMode == 0]
                         SNObjects = []
                         for entryLine in tp_SpecimenNotepadEntries:
                             _entryData = entryLine.text.split(" ")
@@ -453,7 +453,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                             TelePath.send(SNEntry.Index, quiet=True)  # Open the entry 
                             TelePath.read_data()           # Receive data
                             #TODO: What if more than one page of text?
-                            SNText = list(map(lambda x: x.text, TelePath.Screen.ParsedANSI[2:-2]))
+                            SNText = list(map(lambda x: x.text, TelePath.ParsedANSI[2:-2]))
                             SNEntry.Text = ";".join(SNText)# Copy down the text and put it into the instance
                             TelePath.send("B", quiet=True)            # Go BACK, not default option QUIT 
                             time.sleep(0.1)
@@ -468,11 +468,11 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                 TelePath.read_data()
                 TelePath.send("1", quiet=True)
                 TelePath.read_data()
-                Sample.NHSNumber = TelePath.Screen.chunk_or_none(TelePath.Screen.ParsedANSI, line=17, column=37, highlighted=True)
+                Sample.NHSNumber = TelePath.chunk_or_none(TelePath.ParsedANSI, line=17, column=37, highlighted=True)
                 
                 TelePath.send("4", quiet=True)
                 TelePath.read_data()   # And read screen.
-                Details = TelePath.Screen.Lines[11].strip()
+                Details = TelePath.Lines[11].strip()
                 if Details:
                     Sample.ClinDetails = Details
                 
@@ -491,25 +491,25 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                     TelePath.send(str(SetToGet.Index), quiet=True)
                     TelePath.read_data()
 
-                    if (TelePath.Screen.Type == "SENQ_DisplayResults"):
+                    if (TelePath.ScreenType == "SENQ_DisplayResults"):
                         extract_results(SetToGet, Sample.Collected)
-                        if ("Set com" in TelePath.Screen.Options and GetComments==True):
+                        if ("Set com" in TelePath.Options and GetComments==True):
                             extract_set_comments(SetToGet)
 
-                    elif (TelePath.Screen.Type == "SENQ_Screen3_FurtherSetInfo"): 
+                    elif (TelePath.ScreenType == "SENQ_Screen3_FurtherSetInfo"): 
                         SetToGet.AuthedOn = "[Not Authorized]"
                         SetToGet.AuthedBy = "[Not Authorized]"
                         SetToGet.Results = []
-                        if ("Results" in TelePath.Screen.Options):
+                        if ("Results" in TelePath.Options):
                             TelePath.send('R', quiet=True)
                             TelePath.read_data(max_wait=400)
                             extract_results(SetToGet, Sample.Collected)
-                            if ("Set com" in TelePath.Screen.Options and GetComments==True):
+                            if ("Set com" in TelePath.Options and GetComments==True):
                                 extract_set_comments(SetToGet)
                             TelePath.send('B', quiet=True)
                             TelePath.read_data()
 
-                    else: logging.error("complete_specimen_data_in_obj(): cannot handle screen type '%s'" % TelePath.Screen.Type)
+                    else: logging.error("complete_specimen_data_in_obj(): cannot handle screen type '%s'" % TelePath.ScreenType)
 
                     TelePath.send('B', quiet=True)        # Back to tp_Specimen overview - Without the sleep, bottom half of the SENQ screen might be caught still being transmitted.
                     TelePath.read_data()
@@ -517,7 +517,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             # if (GetSets)
             TelePath.send("", quiet=True)                 # Exit specimen
             TelePath.read_data()              # Receive clean tp_Specimen Enquiry screen
-        # if/else TelePath.Screen.hasError()
+        # if/else TelePath.hasError()
         SampleCounter += 1
         Pct = (SampleCounter / nSamples) * 100
         if( SampleCounter % ReportInterval == 0): 
@@ -556,17 +556,17 @@ def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, La
     TelePath.send("") # Skip consultant
     TelePath.read_data() # TODO: why is everything in ONE LINE
     logging.info(f"get_recent_samples_of_set_type(): Loading samples...")
-    fixLines = TelePath.Screen.Lines[1].split("\r\n")
+    fixLines = TelePath.Lines[1].split("\r\n")
     fixLines = [x for x in fixLines if x]
     col_widths = utils.extract_column_widths(fixLines[1])
     samples = []
-    while (TelePath.Screen.DefaultOption == "N") and (len(samples) < nMaxSamples):
+    while (TelePath.DefaultOption == "N") and (len(samples) < nMaxSamples):
         _samples = utils.process_whitespaced_table(fixLines[2:], col_widths)
         for x in _samples:
             samples.append("".join(x[1:3]))
-        TelePath.send(TelePath.Screen.DefaultOption)
+        TelePath.send(TelePath.DefaultOption)
         TelePath.read_data()
-        fixLines = TelePath.Screen.Lines[1].split("\r\n")
+        fixLines = TelePath.Lines[1].split("\r\n")
         fixLines = [x for x in fixLines if x]
     logging.info(f"get_recent_samples_of_set_type(): Search complete. {len(samples)} samples found.")
     if len(samples) > nMaxSamples:
@@ -580,7 +580,7 @@ def get_outstanding_samples_for_Set(Set:str, Section:str=""):
     TelePath.read_data()
     TelePath.send(Section)
     TelePath.read_data()
-    if TelePath.Screen.hasErrors:
+    if TelePath.hasErrors:
         #idk handle errors what am i a professional coder
         pass
     TelePath.send("2") # Request 'Detailed outstanding work by set'
@@ -590,13 +590,13 @@ def get_outstanding_samples_for_Set(Set:str, Section:str=""):
     time.sleep(0.2)
     OutstandingSamples = []
     tmp_table_widths = [1, 5, 20, 32, 39, 58, 61, 71, 74] # These are hardcoded because the headers seem misaligned.
-    while TelePath.Screen.DefaultOption != "Q":
+    while TelePath.DefaultOption != "Q":
         TelePath.read_data()
-        #tmp_table_widths = extract_column_widths(TelePath.Screen.Lines[4])
-        tmp = utils.process_whitespaced_table(TelePath.Screen.Lines[7:-2], tmp_table_widths) #read and process screen
+        #tmp_table_widths = extract_column_widths(TelePath.Lines[4])
+        tmp = utils.process_whitespaced_table(TelePath.Lines[7:-2], tmp_table_widths) #read and process screen
         for x in tmp:
             OutstandingSamples.append(x[1]) #Sample ID is in the second column; off by one makes that index 1. 
-        TelePath.send(TelePath.Screen.DefaultOption, quiet=True) 
+        TelePath.send(TelePath.DefaultOption, quiet=True) 
     TelePath.send("Q")
     logging.info(f"get_outstanding_samples_for_Set(): Located {len(OutstandingSamples)} samples.")
     return OutstandingSamples
@@ -624,12 +624,12 @@ def return_to_main_menu(ForceReturn:bool=False, MaxTries:int=10):
     TargetScreen = "MainMenu"
     if UseTrainingSystem and not ForceReturn:
         TargetScreen = "MainMenu_Training"
-    while(TelePath.Screen.Type != TargetScreen and TryCounter <= MaxTries):
+    while(TelePath.ScreenType != TargetScreen and TryCounter <= MaxTries):
         TelePath.send(config.LOCALISATION.CANCEL_ACTION)
         TelePath.read_data()
         TryCounter = TryCounter+1
     if TryCounter > MaxTries:
-        raise Exception(f"Could not reach main menu in {MaxTries} attempts. Check Screen.recognise_type() logic works correctly.")
+        raise Exception(f"Could not reach main menu in {MaxTries} attempts. Check recognise_Screen_type() logic works correctly.")
 
 """ Connects to a TelePath instance, and logs in the user, querying for Username and Password if none are supplied. """
 def connect(TrainingSystem=False):  
@@ -650,13 +650,13 @@ def connect(TrainingSystem=False):
     else:
         pw = getpass.getpass()
 
-    TelePath.connect(IP=config.LOCALISATION.LIMS_IP, Port=config.LOCALISATION.LIMS_PORT, 
+    TelePath.connect(IP=config.LOCALISATION.LIMS_IP, Port=config.LOCALISATION.LIMS_PORT, Answerback=config.LOCALISATION.ANSWERBACK,
                     IBMUser=config.LOCALISATION.IBM_USER, Userprompt=None, PWPrompt=b"Password :", User=user, PW=pw)      
     
     logging.info("Connected to TelePath. Reading first screen...")
-    while (TelePath.Screen.Type != "MainMenu"):
+    while (TelePath.ScreenType != "MainMenu"):
         TelePath.read_data()
-        logging.debug(f"connect(): Screen type is {TelePath.Screen.Type}, first lines are {TelePath.Screen.Lines[0:2]}")
+        logging.debug(f"connect(): Screen type is {TelePath.ScreenType}, first lines are {TelePath.Lines[0:2]}")
         time.sleep(1) # Wait for ON-CALL? to go away
 
 """ Safely disconnects from the TelePath instance. """
@@ -682,7 +682,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
     for AOTSample in AOTSamples: #TODO: issue here; loop likes to get same sample X times...
         TelePath.send(AOTSample.ID, quiet=True, maxwait_ms=2000)  #Open record
         TelePath.read_data()
-        AOTSample.from_chunks(TelePath.Screen.ParsedANSI) #sometimes around here we get "max() arg is an empty sequence"
+        AOTSample.from_chunks(TelePath.ParsedANSI) #sometimes around here we get "max() arg is an empty sequence"
         TargetIndex = AOTSample.get_set_index("AOT")
         
         if TargetIndex == -1:
@@ -693,9 +693,9 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             #logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
             TelePath.send(config.LOCALISATION.SETHISTORY+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
             TelePath.read_data()
-            if not TelePath.Screen.hasErrors:
+            if not TelePath.hasErrors:
                 #locate line with 'Set requested by: '
-                for line in TelePath.Screen.Lines[6].split("\r\n"):
+                for line in TelePath.Lines[6].split("\r\n"):
                     if line.find("Set requested by: ") != -1:
                         user = line[ line.find("Set requested by: ")+len("Set requested by: "): ].strip()
                         creationDT  = line[0:16].strip()
@@ -717,7 +717,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             #TODO: Check if you get the comment of "Do you want to retain ranges"! Doesn't happen for AOT but...
             TelePath.read_data()
             #TODO: Error(?) in screen rendered seems to shift the IDLine, which 'should' be 'Direct result entry Request <XXX>'
-            #if TelePath.Screen.Lines[2].split() #Direct result entry           Request: 
+            #if TelePath.Lines[2].split() #Direct result entry           Request: 
             # if there's the interim screen, send another ''
         TelePath.send('', quiet=True)                    #Close record
     #for AOTSample
@@ -828,20 +828,20 @@ def privilege_scan(userlist = None) -> None:
     #Enter administration area - needs privilege on TelePath user to access
     TelePath.send(config.LOCALISATION.PRIVILEGES) #requires Level 1 access, do *not* write data to this area to avoid messing up the system.
     TelePath.read_data()
-    assert TelePath.Screen.Type == "PRIVS"
+    assert TelePath.ScreenType == "PRIVS"
 
     for user in userlist:
         TelePath.send(user)
         TelePath.read_data() #Check access was successful
 
         #TODO: If querying an account that does not exist, the cursor goes to line... 6? (TODO:check it's line 6), to make a new account; abort via TelePath.send('^')
-        if TelePath.Screen.cursorPosition[0]<20:
+        if TelePath.cursorPosition[0]<20:
             logging.info(f"privilege_scan(): User '{user}' does not appear to exist on the system.")
             TelePath.send(config.LOCALISATION.CANCEL_ACTION) #Return to main screen, ready for next
             continue
         
         #If that isn't the case, grab results and parse
-        results = TelePath.Screen.Lines[3:16] #TODO: Check exact lines
+        results = TelePath.Lines[3:16] #TODO: Check exact lines
         results = [x for x in results if x.strip()]
         result_tbl = utils.process_whitespaced_table(results, [0, 28]) #TODO: check this estimated col width works
         

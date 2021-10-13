@@ -150,8 +150,8 @@ class NPCLList():
 def get_Set_definitions(Sets:list, reckless=False):
 
     def check_access():
-        if (ProfX.screen.length >= 24):
-            if (ProfX.screen.Lines[23].strip() == "Set accessed by another user at present. Press ESC"):
+        if (ProfX.screenLength >= 24):
+            if (ProfX.Lines[23].strip() == "Set accessed by another user at present. Press ESC"):
                 setRipperLogger.warning(f"Cannot access Set {Set}, being used by another user. Dropping.")
                 #SetDefinitions.append(SetDefinition(SetCode=Set, AuthorisationGroup="", AutoCommentGroup="", AccessedSuccessfully=False))
                 ProfX.send_raw(b'\x1b', readEcho=False)
@@ -177,8 +177,8 @@ def get_Set_definitions(Sets:list, reckless=False):
         if not check_access():            
                 continue
         
-        if (ProfX.screen.length >= 24):
-            if (ProfX.screen.Lines[23].strip() == "WARNING: Exists as a superset, with priority at request entry - OK <N>"):
+        if (ProfX.screenLength >= 24):
+            if (ProfX.Lines[23].strip() == "WARNING: Exists as a superset, with priority at request entry - OK <N>"):
                 setRipperLogger.warning(f"Set {Set} is a 'superset', retrieving anyway...")
                 ProfX.send_raw('Y'.encode('ASCII')) #In this instance, the system instantly reacts to the keypress
                 # sending it with the \r added by regular send() will then immediately skip to 'acceptable sample types'
@@ -188,8 +188,8 @@ def get_Set_definitions(Sets:list, reckless=False):
                 else:
                      continue
                 
-        AuthGroupLine = [x for x in ProfX.screen.ParsedANSI if x.line == 19 and x.column == 68 and x.text.strip(".")] #[x for x in ProfX.screen.Lines[14].split(" ") if x]
-        AUCOMLine = [x for x in ProfX.screen.ParsedANSI if x.line == 14 and x.column == 33 and x.text.strip(".")] #[x for x in ProfX.screen.Lines[19].split(" ") if x]
+        AuthGroupLine = [x for x in ProfX.ParsedANSI if x.line == 19 and x.column == 68 and x.text.strip(".")] #[x for x in ProfX.Lines[14].split(" ") if x]
+        AUCOMLine = [x for x in ProfX.ParsedANSI if x.line == 14 and x.column == 33 and x.text.strip(".")] #[x for x in ProfX.Lines[19].split(" ") if x]
 
         if AUCOMLine:
             AUCOM_Code = AUCOMLine[0].text
@@ -221,15 +221,15 @@ def get_NPCL_Interventions(NPCL_Lists:list):
         setRipperLogger.info(f"Retrieving auto-Authorization Interventions for NPCL list '{NPCL_List.AuthCode}'...")
         ProfX.send(NPCL_List.AuthCode)
         ProfX.read_data()
-        if (ProfX.screen.length <= 23): # The list exists
-            NPCL_List.Checks = [ x[5:] for x in ProfX.screen.Lines[10:14] ]
+        if (ProfX.screenLength <= 23): # The list exists
+            NPCL_List.Checks = [ x[5:] for x in ProfX.Lines[10:14] ]
             ProfX.send('^L')   
             ProfX.read_data()
-            if (ProfX.screen.length <= 23): #List exists AND has sets
-                if (ProfX.screen.hasErrors):
+            if (ProfX.screenLength <= 23): #List exists AND has sets
+                if (ProfX.hasErrors):
                     setRipperLogger.warning(f"'{NPCL_List.AuthCode}': No codes are within the given specification")
                     continue
-                AuthSets =  [x for x in ProfX.screen.Lines[4:-1] if x] #grab lines with sets
+                AuthSets =  [x for x in ProfX.Lines[4:-1] if x] #grab lines with sets
                 for line in AuthSets:
                     line = [x.strip() for x in line.split(" ") if x]
                     index = line[0].rstrip(")")
@@ -237,7 +237,7 @@ def get_NPCL_Interventions(NPCL_Lists:list):
                     ProfX.send(index)
                     ProfX.read_data()
                     #There does not seem to be an N option on this screen, ever; max is 28 items. No check / page turning code needed.
-                    CodeLines = [x for x in ProfX.screen.Lines[5:-1] if x]
+                    CodeLines = [x for x in ProfX.Lines[5:-1] if x]
                     CodeTable = process_whitespaced_table(tableLines = CodeLines, headerWidths = [8, 14, 44, 47, 54, 86])
                     assert len(CodeTable) % 2 == 0
                     cleanTable = [x[0:3] for x in CodeTable]
@@ -266,7 +266,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
     def process_SNPCL_screen():
         nonlocal Page_Has_Blanks
         nonlocal NPCL_Item_Tuples
-        _tmpTable = process_whitespaced_table(tableLines=ProfX.screen.Lines[5:21], headerWidths=[7, 15, 44, 47, 55])
+        _tmpTable = process_whitespaced_table(tableLines=ProfX.Lines[5:21], headerWidths=[7, 15, 44, 47, 55])
         for row in _tmpTable:
             if row[1]:
                 NPCL_Item_Tuples.append((row[0].rstrip(")"), row[1], row[2]))
@@ -288,7 +288,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
         setRipperLogger.info(f"get_authorisation_group_structure(): Retrieving NPCL lists(s) for {SNPCLList}.")
         ProfX.send(SNPCLList)
         ProfX.read_data()
-        if (ProfX.screen.length == 24):  # Set does not exist and we entered creation mode
+        if (ProfX.screenLength == 24):  # Set does not exist and we entered creation mode
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} is being accessed. Must be retried later.")
             ProfX.send_raw(b'\x1B')
             ProfX.read_data()
@@ -297,7 +297,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
             ProfX.read_data()
             continue
 
-        if (ProfX.screen.Lines[4].strip() != "Auth code"):  # Set does not exist and we entered creation mode
+        if (ProfX.Lines[4].strip() != "Auth code"):  # Set does not exist and we entered creation mode
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} does not appear to exist. This shouldn't happen if fed from set_ripper().")
             ProfX.send(config.LOCALISATION.CANCEL_ACTION)        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
             ProfX.read_data()
@@ -320,7 +320,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
                 ProfX.read_data()
                 ProfX.send(NPCLListIndex[0])#, readEcho=False) # Indices here are not per page but unique, and can be called from any page.
                 ProfX.read_data()
-                tmp.LogicTree = [x for x in ProfX.screen.Lines[2:22] if x]
+                tmp.LogicTree = [x for x in ProfX.Lines[2:22] if x]
                 ProfX.send('A')
                 ProfX.read_data()
             else:
@@ -345,12 +345,12 @@ def get_autocomment_structure(AUCOMSets:set):
         Autocomment_Obj = AutoCommentStructure(AUCOM_Routine)
         ProfX.send(AUCOM_Routine)
         ProfX.read_data()
-        if (ProfX.screen.length >= 24):
-            if (ProfX.screen.Lines[-1] == " Unable to allocate spec. Press ESC"):  # If the set is being accessed and thus locked.
+        if (ProfX.screenLength >= 24):
+            if (ProfX.Lines[-1] == " Unable to allocate spec. Press ESC"):  # If the set is being accessed and thus locked.
                 ProfX.send_raw(b'\x1B')
                 continue
         else:
-            AUCOM_Chunks = [x for x in ProfX.screen.ParsedANSI if x.line == 3 and x.deleteMode == 0]
+            AUCOM_Chunks = [x for x in ProfX.ParsedANSI if x.line == 3 and x.deleteMode == 0]
             if AUCOM_Chunks:
                 AUCOM_Chunks = AUCOM_Chunks[1:] # First line is a header which we would like to ignore
                 try:
@@ -362,7 +362,7 @@ def get_autocomment_structure(AUCOMSets:set):
                         ProfX.send(Index)
                         #time.sleep(0.2)         # Safety measure, gives the server time to collate its data
                         ProfX.read_data()
-                        CommStr = [x for x in ProfX.screen.Lines[3:-1] if x]
+                        CommStr = [x for x in ProfX.Lines[3:-1] if x]
                         FinalComms=[]
                         for line in CommStr:
                             line = line.split("\r\n")
@@ -372,7 +372,7 @@ def get_autocomment_structure(AUCOMSets:set):
                                     FinalComms.append(comm)
                         ProfX.send('A')    # (A)ccept, switches to logic view
                         ProfX.read_data()
-                        CommLogic = [x for x in ProfX.screen.Lines[3:-1] if x]
+                        CommLogic = [x for x in ProfX.Lines[3:-1] if x]
                         tmpACP = AutoCommentSet(FinalComms, CommLogic)
                         Autocomment_Obj.Pages.append(tmpACP)    # Creates data structure and appends to AutoCommentStructure container
                         ProfX.send('A')    # (A)ccept, goes back to root for next index
@@ -384,12 +384,12 @@ def get_autocomment_structure(AUCOMSets:set):
             ProfX.send('A')    # (A)ccept, returns to root screen
             ProfX.read_data()
             try:
-                FullLines = [x for x in ProfX.screen.Lines if x]
+                FullLines = [x for x in ProfX.Lines if x]
                 assert len(FullLines) < 5 # If we successfully returned to the main screen, there is only System Header, Screen Type, Routine / Title line. Not even options.
             except AssertionError:
                 setRipperLogger.debug(f"get_autocomment_structure(): Unclear whether return to base screen was successful:")
-                setRipperLogger.debug(ProfX.screen.Text)
-        #if ProfX.screen.length < 24
+                setRipperLogger.debug(ProfX.Text)
+        #if ProfX.screenLength < 24
         AUCOM_Data.append( Autocomment_Obj )
     #for AUCOM_Routine
     return AUCOM_Data

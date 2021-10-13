@@ -1,5 +1,12 @@
 ﻿#GPL-3.0-or-later
 
+#TODO: APEX uses more short-lived information strings. they'll blink then be erased.
+#Also, multiple patients to one specimen
+#TODO: subclass Screen into APEX_Screen, and connection into APEX_Connection, I guess. Or attach a statusline=None
+#Then, the line designated as statusline gets its chunk separated out, parsed ,but each time it's erased individually, its value is appended to list
+#In fact - just make it a list of line(s)?
+
+
 VERSION = "0.1.0"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
@@ -15,7 +22,7 @@ import telnet_ANSI
 import time
 
 APEX = telnet_ANSI.Connection()
-telnet_ANSI.Screen.recognise_type = apex_config.LOCALISATION.identify_screen
+telnet_ANSI.recognise_type = apex_config.LOCALISATION.identify_screen
 
 # Functions --------
 """ """
@@ -71,15 +78,35 @@ def BasicInterface():
 
 """ """
 def return_to_main_menu(ForceReturn:bool=False, MaxTries:int=10):
-    TryCounter = 0
-    logging.debug("Returning to main menu...")
-    TargetScreen = "MainMenu"
-    while(APEX.Screen.Type != TargetScreen and TryCounter <= MaxTries):
-        APEX.send(apex_config.LOCALISATION.CANCEL_ACTION)
+    #APEX.send(b"\x1B\x5B\x31\x37\x7E") # CSI 17~ eq F6
+    APEX.send(b"\x1B\x5B17~")
+    APEX.send(b'Y')
+    #TryCounter = 0
+    #logging.debug("Returning to main menu...")
+    #TargetScreen = "MainMenu"
+    #while(APEX.ScreenType != TargetScreen and TryCounter <= MaxTries):
+    #    APEX.send(apex_config.LOCALISATION.CANCEL_ACTION)
+    #    APEX.read_data()
+    #    TryCounter = TryCounter+1
+    #if TryCounter > MaxTries:
+    #    raise Exception(f"Could not reach main menu in {MaxTries} attempts.")
+
+""" """
+def retrieve_Specimen_data(Samples:list, retrieveBy:str="SpecimenID"):
+    #assert retrieveBy is one of "SpecimenID", "NHSNumber" 
+    return_to_main_menu()
+    APEX.send(apex_config.LOCALISATION.ENQUIRIES)
+    APEX.read_data()
+    for Sample in Samples: 
+        if (retrieveBy == "SpecimenID"):
+            APEX.send_and_ignore(b'\x1B\x5B\x32\x42') #VT100 control sequence: ^[nB, or "arrow down n times"; undefined n means once
+            APEX.send(Sample.ID)
+        if (retrieveBy == "NHSNumber"):
+            APEX.send_and_ignore(b'\x1B\x5B\x42') #Go down once
+            APEX.send(Sample.NHSNumber)
+        else:
+            raise Exception("retrieve_Specimen_data(): retrieveBy must be either 'SpecimenID' (default) or 'NHSNumber'")
         APEX.read_data()
-        TryCounter = TryCounter+1
-    if TryCounter > MaxTries:
-        raise Exception(f"Could not reach main menu in {MaxTries} attempts.")
 
 """ Connects to APEX and logs in user, querying for Username and Password. """
 def connect(TrainingSystem=False):  
@@ -104,17 +131,18 @@ def connect(TrainingSystem=False):
     Userprompt=None, PWPrompt=b"Password :", User=user, PW=pw)      
     
     logging.info("Connected to APEX. Reading first screen...")
-    while (APEX.Screen.Type != "MainMenu"):
+    while (APEX.ScreenType != "MainMenu"):
         APEX.read_data(wait=False)
-        logging.debug(f"connect(): Screen type is {APEX.Screen.Type}, first lines are {APEX.Screen.Lines[0:2]}")
+        logging.debug(f"connect(): Screen type is {APEX.ScreenType}, first lines are {APEX.Screen.Lines[0:2]}")
         time.sleep(1) # Wait for ON-CALL? to go away
+    logging.info("Connected to APEX Main Menu. Welcome.")
 
-""" """
+""" Disconnects as safely as possible."""
 def disconnect():
     return_to_main_menu(ForceReturn=True)
     logging.info("disconnect(): Disconnecting.")
-    APEX.send('', readEcho=False)
-    APEX.send_raw(b'\x04', readEcho=False)         
+    APEX.send('X', readEcho=False)
+    APEX.send('', readEcho=False)         
 
 # Script --------
 logging.basicConfig(filename='./apex_debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
@@ -127,7 +155,8 @@ logging.info(f"APEXPredator client, version {VERSION}. (c) Lorenz K. Becker, und
 
 try:
     connect()
-    BasicInterface()
+    #BasicInterface()
+
 
 except Exception as e: 
     logging.error(e)

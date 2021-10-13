@@ -163,25 +163,33 @@ class RawANSICommand():
     def __repr__(self): return (f"<{self.cmd}: {self.b1} {self.b2} {self.b3} => '{self.txt}'>")
 
 
-"""Virtual screen, on which ParsedANSICommands are assembled into their final shape."""
-class Screen(): #TODO: does this need to be a class?
+class Connection():
+    """ Contains methods and strutures to connect to, and exchange data with, the LIMS system """
+    DEBUGLEVEL          = 0                 # value >0 will show (parts of) telnet traffic on-screen, this may include your password 
+    MAX_WINDOW_WIDTH    = 128               # Max Value: 65535
+    MAX_WINDOW_HEIGHT   = 5000              # 
+    TERMINALS           = [b"", b"VT100", b"VT102", b"NETWORK-VIRTUAL-TERMINAL", b"UNKNWN"] #A list of the different terminal types we're willing to lie and pretend we are
     History = []
     HISTORY_LENGTH = 5
+    EscapeSplitter = re.compile(r"(?=\x1b)", flags=re.M)
 
-    def __init__(self, Connection, BasedOnPrev=True):
-        self.BasedOnPrev    = BasedOnPrev
-        self.ParsedANSI     = []        # The parsed ANSI instructions, whose execution will create the current screen from self.lastScreen
-        self.Lines          = []        # The result of applying all the instructions in self.ParsedANSI to self.lastScreen
-        self.Text           = ""        # The screen as a single multi-line text string
-        self.Type           = "UNKNOWN" # The type of screen, usually indiated by the text on line 1
-        self.Options        = []        # The final line of the screen tends to tell users how to proceed
+    def __init__(self, Answerback=b'VT100\x0D'):
+        self.tn = telnetlib.Telnet()
+        self.TERMCOUNTER    = 1             # keeps track of how many terminal types we're already tried.
+        self.LASTCMD        = b""           # stores last option being called, for purposes of knowing what subnegotiation to do (because telnetlib chops that up)
+        self.textBuffer     = b""           # stores whatever was received from the socket.
+        self.Answerback     = Answerback
+        self.ParsedANSI     = []            # The parsed ANSI instructions, whose execution will create the current screen from self.lastScreen
+        self.Lines          = []            # The result of applying all the instructions in self.ParsedANSI to self.lastScreen
+        self.Text           = ""            # The screen as a single multi-line text string
+        self.ScreenType     = "UNKNOWN"     # The type of screen, usually indiated by the text on line 1
+        self.Options        = []            # The final line of the screen tends to tell users how to proceed
         self.OptionStr      = ""
-        self.DefaultOption  = "^"       # This includes a default option
+        self.DefaultOption  = "^"           # This includes a default option
         self.Errors         = []
         self.hasErrors      = False
         self.CursorRow      = 0
         self.CursorCol      = 0
-        self.Connection     = Connection
 
     def __str__(self):
         return (self.Text)
@@ -189,42 +197,128 @@ class Screen(): #TODO: does this need to be a class?
     def __repr__(self): 
         return (f"Screen({len(self.Lines)} lines, {len(self.ParsedANSI)} ANSI chunks)")
 
-    def recognise_type(self):
+    """ Handles TELNET option negotiation """
+    def set_options(self, tsocket, command, option):
+        if command == b"\xfa" and option == b"\x00": #Subnegotiation, request to send 
+            #a = Connection.tn.read_sb_data()
+            #print(a)
+            if self.LASTCMD == b"\x18": #Negotiate terminal 
+                if Connection.DEBUGLEVEL > 0: telnetLogger.debug("Subnegotiating terminal type...")
+                tsocket.send(b"%s%s\x18\x00%s%s%s" % (telnetlib.IAC, telnetlib.SB, Connection.TERMINALS[self.TERMCOUNTER], telnetlib.IAC, telnetlib.SE) ) #Declare 
+                if self.TERMCOUNTER < len(Connection.TERMINALS): self.TERMCOUNTER = self.TERMCOUNTER + 1
+                self.LASTCMD = b''
+
+            elif self.LASTCMD == telnetlib.NAWS: #Negotiated window size; technically irrelevant as this is a virtual terminal
+                if Connection.DEBUGLEVEL > 0: telnetLogger.debug("Subnegotiating window size...")
+                width = struct.pack('H', Connection.MAX_WINDOW_WIDTH)
+                height = struct.pack('H', Connection.MAX_WINDOW_HEIGHT)
+                tsocket.send(telnetlib.IAC + telnetlib.SB + telnetlib.NAWS + width + height + telnetlib.IAC + telnetlib.SE)
+                self.LASTCMD = b''
+
+            else: telnetLogger.debug("SUBNEGOTIATE OTHER: %s" % self.LASTCMD)
+              
+        elif option == b'\x18' and command == telnetlib.DO:
+            telnetLogger.debug("Promising Terminal Type")
+            tsocket.send(b"%s%s\x18" % (telnetlib.IAC, telnetlib.WILL)) # Promise we'll send a terminal type
+            self.LASTCMD = b'\x18'
+                    
+        elif command == telnetlib.WILL and option == b'\x01': tsocket.send(b"%s%s\x01" % (telnetlib.IAC, telnetlib.DO))
+        elif command == telnetlib.WILL and option == b'\x03': tsocket.send(b"%s%s\x03" % (telnetlib.IAC, telnetlib.DO))
+
+        elif command == telnetlib.DO and option == telnetlib.NAWS: 
+            tsocket.send(telnetlib.IAC + telnetlib.WILL + telnetlib.NAWS)
+            self.LASTCMD = telnetlib.NAWS
+        
+        #For all commands we have not explicitly defined behaviour for, deny:
+        elif command in (telnetlib.DO, telnetlib.DONT): tsocket.send(telnetlib.IAC + telnetlib.WONT + option) 
+        #We refuse to do anything else
+        elif command in (telnetlib.WILL, telnetlib.WONT): tsocket.send(telnetlib.IAC + telnetlib.DONT + option) 
+        #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY. 
+
+    def read_data(self, max_wait = 200, ms_input_wait = 100, wait = True): #HACK: 100 / 50?
+        self.textBuffer = self.tn.read_very_eager() #very_eager never blocks, only returns data stripped of all TELNET control codes, negotiation, etc                              
+        if self.textBuffer == b'' or wait:            # we didn't get anything (yet?) but we expected something
+            time.sleep(ms_input_wait/1000)          # give APEX 500ms to get its shit together
+            tmp = self.tn.read_very_eager()   # try reading again
+            waited = ms_input_wait
+            while tmp != b'' and waited < max_wait: # read until we get nothing
+                self.textBuffer += tmp        # append what we got
+                time.sleep(ms_input_wait/1000)      # give APEX 500ms to get its shit together
+                waited = waited + ms_input_wait     # count wait time
+                tmp = self.tn.read_very_eager()   # try reading again
+        if self.textBuffer:
+            self.Screen_from_text(self.textBuffer)
+            telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.ParsedANSI))
+
+    def send_raw(self, message, quiet=False, readEcho=True):
+        try:
+            if not quiet: telnetLogger.debug(f"Sending {message} to Connection")
+            self.tn.write(message)
+            if (readEcho): self.tn.read_until(message)
+        except OSError as OSE:
+            telnetLogger.error(f"Error whilst attempting to send message to Connection: {OSE.strerror}")
+        except:
+            pass
+    
+    def send(self, message, quiet=False, readEcho=True, maxwait_ms=1000):
+        try:
+            message = str(message)
+            ASCIImsg = message.encode("ASCII")+b'\x0D'
+            if not quiet: telnetLogger.debug(f"Sending '{message}' to Connection")
+            self.tn.write(ASCIImsg)
+            if (readEcho): 
+                if message:
+                    if (message[0]=='^' and len(message)==2):
+                        self.tn.read_until(message[1].encode("ASCII"), timeout=(maxwait_ms/1000))
+                    else:
+                        self.tn.read_until(message.encode("ASCII"), timeout=(maxwait_ms/1000))
+        except OSError as OSE:
+            telnetLogger.error("Error whilst attempting to send message to Connection: %s", OSE.strerror)
+       
+    def send_and_ignore(self, msg, quiet=False, readEcho=True):
+        self.send(msg, quiet, readEcho)   # 
+        self.tn.read_very_eager()         # Take and ignore all data being returned in response to this message
+
+    def connect(self, IP, Port:int=23, IBMUser:str="AIX", Answerback:bytes=b"VT100\x0D", Userprompt:str=None, User:str=None, PWPrompt:str=None, PW:str=None):
+        self.Answerback = Answerback 
+        if Userprompt and not User:
+            telnetLogger.error("connect(): A Userprompt but no user has been supplied. Cannot aupply user if asked by remote host. Terminating.")
+            raise Exception("connect(): Userprompt but no User supplied")
+        
+        if PWPrompt and not PW:
+            telnetLogger.error("connect(): Given PWPrompt but no PW to respond with. Terminating.")
+            raise Exception("connect(): PWPrompt but no PW supplied")
+
+        self.tn.set_option_negotiation_callback(self.set_options)  #Register our set_options function as the resource to interpret any negotiation calls we get
+        self.tn.set_debuglevel(Connection.DEBUGLEVEL)
+        telnetLogger.debug("Opening connection to remote host...")
+        self.tn.open(IP, Port, timeout=1)
+        self.tn.read_until(b"login: ")
+        self.send(IBMUser)
+        telnetLogger.debug("Connected to remote. Waiting for login...")
+        self.tn.read_until(b'\x05')
+        self.tn.write(self.Answerback)
+        #TODO: be ready for invalid Terminal ID; make up/use a different one.
+
+        #TODO: double check you can't still read until User THEN PW.
+        #Or, get a user-supplied one, and if none, skip that part (and write at the other.)
+        if Userprompt:
+            self.tn.read_until(Userprompt)
+            self.send(User)
+        if PWPrompt:
+            if User and not Userprompt:
+                self.send(User)
+            self.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
+            self.send(PW, quiet=True, readEcho=False)
+            self.tn.set_debuglevel(Connection.DEBUGLEVEL)
+
+    def recognise_Screen_type(self):
         raise Exception("This base method should have been overridded using an appropriate, LIMS-specific method!")
-
-    @staticmethod
-    def prevScreen():
-        return Screen.History[-1]
-
-    @staticmethod
-    def prevLines():
-        return Screen.History[-1].Lines
-
-    @property
-    def cursorPosition(self):
-        return (self.CursorRow, self.CursorCol)
-
-    @property
-    def length(self):
-        return len(self.Lines)
-
-    @staticmethod
-    def chunk_or_none(chunks, line, column, highlighted=None):
-        if highlighted is not None:
-            _chunk = [x for x in chunks if x.line == line and x.column == column and x.highlighted == highlighted]
-        else:
-            _chunk = [x for x in chunks if x.line == line and x.column == column]
-        if _chunk:
-            if len(_chunk)>1:
-                telnetLogger.debug("chunk_or_none(): Multiple candidates, returning None. Please refine search criteria.")
-                return None
-            return _chunk[0].text
-        return None
 
     def parse_raw_ANSI(self, workingText):
         _ParsedANSI       = []
         if workingText == b'\x05':
-            self.Connection.write(self.Connection.TerminalType)
+            self.tn.write(self.Answerback)
             return
         workingText         = workingText.decode("ASCII").lstrip()
         firstANSICodePos    = workingText.find('\x1b[')
@@ -292,19 +386,17 @@ class Screen(): #TODO: does this need to be a class?
                 currentColumn += len(RawANSIChunk.txt) #if the next RawANSIChunk does not reset position (e.g. cursor move), we need to keep up ourselves. 
         self.ParsedANSI = _ParsedANSI
 
-    def from_text(self, text:str):
+    def Screen_from_text(self, text:str):
         self.parse_raw_ANSI(text)
-        self.render()
+        self.render_Screen()
 
-    def save(self):
+    def save_Screen(self):
         self.Text = "\n".join(self.Lines)
-        self.recognise_type()
-        Screen.History.append(self)
-        Screen.History = Screen.History[0: min(len(Screen.History), Screen.HISTORY_LENGTH)]
+        self.recognise_Screen_type()
+        self.History.append(self.Lines)
+        self.History = self.History[0: min(len(self.History), self.HISTORY_LENGTH)]
 
-    def render(self):
-        if len(Screen.History)>0: 
-            if self.BasedOnPrev: self.Lines = Screen.prevLines() #Retrieve previous screen, which ANSI commands may alter
+    def render_Screen(self):
         for currentIndex in range(0, len(self.ParsedANSI)):
             ANSICmd = self.ParsedANSI[currentIndex]
             self.CursorCol = ANSICmd.column
@@ -356,139 +448,26 @@ class Screen(): #TODO: does this need to be a class?
                 self.Lines[ANSICmd.line] = self.Lines[ANSICmd.line][0:ANSICmd.column] + ANSICmd.text + self.Lines[ANSICmd.line][ANSICmd.column+len(ANSICmd.text):]
             else: 
                 self.Lines[ANSICmd.line] += ANSICmd.text #else, we can just append
-
-        self.save()
-
-
-class Connection():
-    """ Contains methods and strutures to connect to, and exchange data with, the LIMS system """
-    DEBUGLEVEL          = 0                 # value >0 will show (parts of) telnet traffic on-screen, this may include your password 
-    MAX_WINDOW_WIDTH    = 128               # Max Value: 65535
-    MAX_WINDOW_HEIGHT   = 5000              # 
-    TERMINALS           = [b"", b"VT100", b"VT102", b"NETWORK-VIRTUAL-TERMINAL", b"UNKNWN"] #A list of the different terminal types we're willing to lie and pretend we are
-    EscapeSplitter = re.compile(r"(?=\x1b)", flags=re.M)
-
-    def __init__(self):
-        self.tn = telnetlib.Telnet()
-        self.TERMCOUNTER         = 1                 # keeps track of how many terminal types we're already tried.
-        self.LASTCMD             = b""               # stores last option being called, for purposes of knowing what subnegotiation to do (because telnetlib chops that up)
-        self.textBuffer          = b""               # stores whatever was received from the socket.
-        self.Screen              = Screen(self.tn)
-        self.TerminalType        = b'VT100\x0D'
-
-    """ Handles TELNET option negotiation """
-    def set_options(self, tsocket, command, option):
-        if command == b"\xfa" and option == b"\x00": #Subnegotiation, request to send 
-            #a = Connection.tn.read_sb_data()
-            #print(a)
-            if self.LASTCMD == b"\x18": #Negotiate terminal 
-                if Connection.DEBUGLEVEL > 0: telnetLogger.debug("Subnegotiating terminal type...")
-                tsocket.send(b"%s%s\x18\x00%s%s%s" % (telnetlib.IAC, telnetlib.SB, Connection.TERMINALS[self.TERMCOUNTER], telnetlib.IAC, telnetlib.SE) ) #Declare 
-                if self.TERMCOUNTER < len(Connection.TERMINALS): self.TERMCOUNTER = self.TERMCOUNTER + 1
-                self.LASTCMD = b''
-
-            elif self.LASTCMD == telnetlib.NAWS: #Negotiated window size; technically irrelevant as this is a virtual terminal
-                if Connection.DEBUGLEVEL > 0: telnetLogger.debug("Subnegotiating window size...")
-                width = struct.pack('H', Connection.MAX_WINDOW_WIDTH)
-                height = struct.pack('H', Connection.MAX_WINDOW_HEIGHT)
-                tsocket.send(telnetlib.IAC + telnetlib.SB + telnetlib.NAWS + width + height + telnetlib.IAC + telnetlib.SE)
-                self.LASTCMD = b''
-
-            else: telnetLogger.debug("SUBNEGOTIATE OTHER: %s" % self.LASTCMD)
-              
-        elif option == b'\x18' and command == telnetlib.DO:
-            telnetLogger.debug("Promising Terminal Type")
-            tsocket.send(b"%s%s\x18" % (telnetlib.IAC, telnetlib.WILL)) # Promise we'll send a terminal type
-            self.LASTCMD = b'\x18'
-                    
-        elif command == telnetlib.WILL and option == b'\x01': tsocket.send(b"%s%s\x01" % (telnetlib.IAC, telnetlib.DO))
-        elif command == telnetlib.WILL and option == b'\x03': tsocket.send(b"%s%s\x03" % (telnetlib.IAC, telnetlib.DO))
-
-        elif command == telnetlib.DO and option == telnetlib.NAWS: 
-            tsocket.send(telnetlib.IAC + telnetlib.WILL + telnetlib.NAWS)
-            self.LASTCMD = telnetlib.NAWS
         
-        #For all commands we have not explicitly defined behaviour for, deny:
-        elif command in (telnetlib.DO, telnetlib.DONT): tsocket.send(telnetlib.IAC + telnetlib.WONT + option) 
-        #We refuse to do anything else
-        elif command in (telnetlib.WILL, telnetlib.WONT): tsocket.send(telnetlib.IAC + telnetlib.DONT + option) 
-        #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY. 
+        self.save_Screen()
 
-    def read_data(self, max_wait = 200, ms_input_wait = 100, wait = True): #HACK: 100 / 50?
-        self.textBuffer = self.tn.read_very_eager() #very_eager never blocks, only returns data stripped of all TELNET control codes, negotiation, etc                              
-        if self.textBuffer == b'' or wait:            # we didn't get anything (yet?) but we expected something
-            time.sleep(ms_input_wait/1000)          # give APEX 500ms to get its shit together
-            tmp = self.tn.read_very_eager()   # try reading again
-            waited = ms_input_wait
-            while tmp != b'' and waited < max_wait: # read until we get nothing
-                self.textBuffer += tmp        # append what we got
-                time.sleep(ms_input_wait/1000)      # give APEX 500ms to get its shit together
-                waited = waited + ms_input_wait     # count wait time
-                tmp = self.tn.read_very_eager()   # try reading again
-        if self.textBuffer:
-            self.Screen.from_text(self.textBuffer)
-            self.Screen = Screen.History[-1]
-            telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.Screen.ParsedANSI))
+    @property
+    def cursorPosition(self):
+        return (self.CursorRow, self.CursorCol)
 
-    def send_raw(self, message, quiet=False, readEcho=True):
-        try:
-            if not quiet: telnetLogger.debug(f"Sending {message} to Connection")
-            self.tn.write(message)
-            if (readEcho): self.tn.read_until(message)
-        except OSError as OSE:
-            telnetLogger.error(f"Error whilst attempting to send message to Connection: {OSE.strerror}")
-        except:
-            pass
-    
-    def send(self, message, quiet=False, readEcho=True, maxwait_ms=1000):
-        try:
-            message = str(message)
-            ASCIImsg = message.encode("ASCII")+b'\x0D'
-            if not quiet: telnetLogger.debug(f"Sending '{message}' to Connection")
-            self.tn.write(ASCIImsg)
-            if (readEcho): 
-                if message:
-                    if (message[0]=='^' and len(message)==2):
-                        self.tn.read_until(message[1].encode("ASCII"), timeout=(maxwait_ms/1000))
-                    else:
-                        self.tn.read_until(message.encode("ASCII"), timeout=(maxwait_ms/1000))
-        except OSError as OSE:
-            telnetLogger.error("Error whilst attempting to send message to Connection: %s", OSE.strerror)
-       
-    def send_and_ignore(self, msg, quiet=False, readEcho=True):
-        self.send(msg, quiet, readEcho)   # 
-        self.tn.read_very_eager()         # Take and ignore all data being returned in response to this message
+    @property
+    def screenLength(self):
+        return len(self.Lines)
 
-    def connect(self, IP, Port:int=23, IBMUser:str="AIX", TerminalID:bytes=b"CHM\x0D", Userprompt:str=None, User:str=None, PWPrompt:str=None, PW:str=None):
-        self.TerminalType = TerminalID 
-        if Userprompt and not User:
-            telnetLogger.error("connect(): A Userprompt but no user has been supplied. Cannot aupply user if asked by remote host. Terminating.")
-            raise Exception("connect(): Userprompt but no User supplied")
-        
-        if PWPrompt and not PW:
-            telnetLogger.error("connect(): Given PWPrompt but no PW to respond with. Terminating.")
-            raise Exception("connect(): PWPrompt but no PW supplied")
-
-        self.tn.set_option_negotiation_callback(self.set_options)  #Register our set_options function as the resource to interpret any negotiation calls we get
-        self.tn.set_debuglevel(Connection.DEBUGLEVEL)
-        telnetLogger.debug("Opening connection to remote host...")
-        self.tn.open(IP, Port, timeout=1)
-        self.tn.read_until(b"login: ")
-        self.send(IBMUser)
-        telnetLogger.debug("Connected to remote. Waiting for login...")
-        self.tn.read_until(b'\x05')
-        self.tn.write(self.TerminalType)
-        #TODO: be ready for invalid Terminal ID; make up/use a different one.
-
-        #TODO: double check you can't still read until User THEN PW.
-        #Or, get a user-supplied one, and if none, skip that part (and write at the other.)
-        if Userprompt:
-            self.tn.read_until(Userprompt)
-            self.send(User)
-        if PWPrompt:
-            if User and not Userprompt:
-                self.send(User)
-            self.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
-            self.send(PW, quiet=True, readEcho=False)
-            self.tn.set_debuglevel(Connection.DEBUGLEVEL)
-
+    @staticmethod
+    def chunk_or_none(chunks, line, column, highlighted=None):
+        if highlighted is not None:
+            _chunk = [x for x in chunks if x.line == line and x.column == column and x.highlighted == highlighted]
+        else:
+            _chunk = [x for x in chunks if x.line == line and x.column == column]
+        if _chunk:
+            if len(_chunk)>1:
+                telnetLogger.debug("chunk_or_none(): Multiple candidates, returning None. Please refine search criteria.")
+                return None
+            return _chunk[0].text
+        return None

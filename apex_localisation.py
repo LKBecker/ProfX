@@ -18,10 +18,6 @@ class APEX_Commands:
     RELEASE: str
     EMPTYSTR: str
     QUIT: str
-    SPECIMEN_ENQUIRY: str
-    PATIENT_ENQUIRY: str
-    OUTSTANDING_WORK: str
-    OVERDUE_SAMPLES: str
-    OVERDUE_AUTOMATION: str
+    ENQUIRIES: str
     identify_screen: Callable
     check_sample_id: Callable
