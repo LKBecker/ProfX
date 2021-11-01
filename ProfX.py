@@ -175,18 +175,26 @@ class tp_Specimen(datastructs.Specimen):
         self.FName              = TelePath.chunk_or_none(DataChunks, line = 8, column = 35)
         self.DOB                = TelePath.chunk_or_none(DataChunks, line = 8, column = 63)
         if self.DOB:
-            if "-" in self.DOB:
+            if "-" in self.DOB: #Pre-2000 DOBs that could be confused for 1900 DOBs get a - (within 9 years of current year)
                 _DOB = self.DOB.split("-")
+                _DOB = [x.strip() for x in _DOB]
                 try:
                     self.DOB = datetime.date(year="19"+_DOB[2], month=_DOB[1], day=_DOB[0])
                 except:
                     self.DOB = f"{_DOB[0]}/{_DOB[1]}/19{_DOB[2]}"
             else:
                 try:
-                    self.DOB = datetime.date.strptime(self.DOB, "%d.%m.%y")
+                    self.DOB = datetime.datetime.strptime(self.DOB, "%d.%m.%y")
+                    currentDatetime = datetime.datetime.now()
+                    # TelePath doesn't use - all the time to distinguish centuries,so we need to do a sanity check.
+                    if (self.DOB.year > currentDatetime.year):
+                        self.DOB = self.DOB.replace(year = self.DOB.year - 100)
+
+                    if (self.DOB.year == currentDatetime.year) and (self.DOB.month > currentDatetime.month):
+                        self.DOB = self.DOB.replace(year = self.DOB.year - 100)
                 except:
                     pass
-        
+    
         if self.PatientID:
             if not tp_Patient.Storage.has_item(self.PatientID):
                 _Patient = tp_Patient(self.PatientID)
@@ -582,8 +590,9 @@ def get_outstanding_samples_for_Set(Set:str, Section:str=""):
     TelePath.read_data()
     if TelePath.hasErrors:
         #idk handle errors what am i a professional coder
-        pass
+        raise Exception("Unexpected error after sending Section")
     TelePath.send("2") # Request 'Detailed outstanding work by set'
+    TelePath.read_data()
     TelePath.send(Set)
     TelePath.read_data()
     TelePath.send("0", quiet=True) # Output on 'screen'
@@ -592,6 +601,9 @@ def get_outstanding_samples_for_Set(Set:str, Section:str=""):
     tmp_table_widths = [1, 5, 20, 32, 39, 58, 61, 71, 74] # These are hardcoded because the headers seem misaligned.
     while TelePath.DefaultOption != "Q":
         TelePath.read_data()
+        if TelePath.ScreenType == "OUTW_Basic":
+            #System has returned to main screen without giving Q as the final option...
+            break
         #tmp_table_widths = extract_column_widths(TelePath.Lines[4])
         tmp = utils.process_whitespaced_table(TelePath.Lines[7:-2], tmp_table_widths) #read and process screen
         for x in tmp:
@@ -600,6 +612,10 @@ def get_outstanding_samples_for_Set(Set:str, Section:str=""):
     TelePath.send("Q")
     logging.info(f"get_outstanding_samples_for_Set(): Located {len(OutstandingSamples)} samples.")
     return OutstandingSamples
+
+def get_specimen_history(Samples:list):
+
+    pass
 
 def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
     Patient = sample_to_patient(Sample)
@@ -653,11 +669,11 @@ def connect(TrainingSystem=False):
     TelePath.connect(IP=config.LOCALISATION.LIMS_IP, Port=config.LOCALISATION.LIMS_PORT, Answerback=config.LOCALISATION.ANSWERBACK,
                     IBMUser=config.LOCALISATION.IBM_USER, Userprompt=None, PWPrompt=b"Password :", User=user, PW=pw)      
     
-    logging.info("Connected to TelePath. Reading first screen...")
     while (TelePath.ScreenType != "MainMenu"):
         TelePath.read_data()
         logging.debug(f"connect(): Screen type is {TelePath.ScreenType}, first lines are {TelePath.Lines[0:2]}")
         time.sleep(1) # Wait for ON-CALL? to go away
+    logging.info("connect() Connection established. Login successful.")
 
 """ Safely disconnects from the TelePath instance. """
 def disconnect():
@@ -682,11 +698,11 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
     for AOTSample in AOTSamples: #TODO: issue here; loop likes to get same sample X times...
         TelePath.send(AOTSample.ID, quiet=True, maxwait_ms=2000)  #Open record
         TelePath.read_data()
-        AOTSample.from_chunks(TelePath.ParsedANSI) #sometimes around here we get "max() arg is an empty sequence"
+        AOTSample.from_chunks(TelePath.ParsedANSI)
         TargetIndex = AOTSample.get_set_index("AOT")
         
         if TargetIndex == -1:
-            logging.error(f"Cannot locate AOT set for patient {AOTSample.ID}. Please check code and.or retry.")
+            logging.error(f"Cannot locate AOT set for patient {AOTSample.ID}. Please check code and/or retry.")
             TelePath.send(config.LOCALISATION.EMPTYSTR) #Exit record
             continue
         if get_creators == True:
@@ -719,7 +735,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             #TODO: Error(?) in screen rendered seems to shift the IDLine, which 'should' be 'Direct result entry Request <XXX>'
             #if TelePath.Lines[2].split() #Direct result entry           Request: 
             # if there's the interim screen, send another ''
-        TelePath.send('', quiet=True)                    #Close record
+        TelePath.send(config.LOCALISATION.EMPTYSTR, quiet=True)                    #Close record
     #for AOTSample
 
     if get_creators==True:
@@ -745,7 +761,7 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
         logging.info("sendaways_scan(): Beginning to write overdue sendaways to file...")
         with open(outFile, 'w') as SAWAYS_OUT:
             HeaderStr = "Specimen\tNHS Number\tLast Name\tFirst Name\tDOB\tSample Taken\tTest\tTest Name\tReferral Lab\tContact Lab At\t"
-            HeaderStr = HeaderStr + "Hours Overdue\tCurrent Action\tAction Log\tRecord Status\tSet Comments\tSpecN'Pad\tClinical Details\n"
+            HeaderStr = HeaderStr + "Hours Overdue\tCurrent Action\tAction Log\tRecord Status\tSet Comments\tClinical Details\tSpecimen Notepad\n"
             SAWAYS_OUT.write(HeaderStr)
             del HeaderStr
             for SAWAY_Sample in OverdueSAWAYs:
@@ -753,8 +769,12 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
                     OverdueSets = [x for x in SAWAY_Sample.Sets if x.is_overdue]
                     for OverdueSet in OverdueSets:
                         #Specimen NHSNumber   Lastname    First Name  DOB Received    Test
-                        outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.NHSNumber}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}"
-                        outStr = outStr+f"\t{SAWAY_Sample.DOB}\t{SAWAY_Sample.Received.strftime('%d/%m/%y')}\t{OverdueSet.Code}\t"
+                        outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.NHSNumber}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}\t"
+                        if isinstance(SAWAY_Sample.DOB, datetime.datetime):
+                            outStr = outStr+SAWAY_Sample.DOB.strftime('%d/%m/%Y')
+                        else:
+                            outStr = outStr+str(SAWAY_Sample.DOB)
+                        outStr = outStr+f"\t{SAWAY_Sample.Received.strftime('%d/%m/%Y')}\t{OverdueSet.Code}\t"
 
                         #Retrieve Referral lab info
                         ReferralLab_Match = [x for x in SAWAY_DB if x.SetCode == OverdueSet.Code]
@@ -1065,34 +1085,36 @@ console.setFormatter(logging.Formatter(LOGFORMAT))
 logging.getLogger().addHandler(console)
 
 logging.info(f"TelePath TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
+connect()
 
 try:
-    connect()
-    #BasicInterface()
+    #==========
+    #Interfaces
+    #==========
+    #CLI()  
+    #BasicInterface()    
 
-    #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
-    #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
-    
-    #sendaways_scan() # Shows how many overdue sendaways there are
-    sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
-    
-    # Retrieves up to 100 recent samples with ELAST. Good for hunting for spare samples to test things.
+    #==========
+    #Data retrieval functions
+    #==========
     #recentSamples = get_recent_samples_of_set_type("ELAST", nMaxSamples=100) 
-    # Downloads and saves into a file all the results for the samples retrieved earlier. Filters for Set in FilterSets.
     #mass_download(recentSamples, FilterSets=["ELAST"]) 
-    
     #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
-    
-    #get_recent_history("A,21.0676517.Z", nMaxSamples=15) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
-    
-    #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
+    #mass_download(["A,15.4853930.B"])
+    #get_recent_history("A,21.7785884.D", nMaxSamples=10) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
     #npex.retrieve_NPEX_data("A,21.7784000.W")
 
+    #==========
+    #Auto-processing functions: Sendaways, AOT stubs, NPEX stragglers.
+    #==========
+    #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
+    #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
+    sendaways_scan() # Shows how many overdue sendaways there are
+    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+    #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
+    #NPEX_Buster(Set="FCAL")
+    
     #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
-
-    #Samples = ["A,21.0477943.S", "A,21.7783585.W", "A,21.7775446.W", "A,21.7775958.R", "A,21.7765990.P", 
-    #            "A,21.7772423.X", "A,21.7772533.W", "A,21.0600201.G", "A,21.0535499.C", "A,21.0664607.D"]
-    #npex.retrieve_NPEX_samples(Samples)
 
 except Exception as e: 
     logging.error(e)

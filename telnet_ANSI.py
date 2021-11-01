@@ -86,7 +86,7 @@ class RawANSICommand():
     nF_EscSequence =  re.compile(r'\x1b\((?P<Prm_Bytes>[\x20-\x2F]*)(?P<Imd_Bytes>[\x20-\x2F]*)(?P<FinalByte>[\x30-\x7E])') 
     #See https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_(Control_Sequence_Introducer)_sequences
     #See https://vt100.net/emu/ctrlseq_dec.html
-    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>[a-zA-Z0-9]+) (?P<params>.+)\\x1b')
+    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>["\w ]+)')
 
     ORD_FINAL_PRIVSEQ_MIN = ord("p")
     ORD_FINAL_PRIVSEQ_MAX = ord("~")
@@ -153,10 +153,15 @@ class RawANSICommand():
             while (len(ANSIBytes)<3): ANSIBytes.append('0')
             return RawANSICommand(nF.group("FinalByte"), 0, 0, ")", text[len(nF.group(0)):]) #TODO test.
 
+        PTERM = RawANSICommand.PTERMCmd.match(text)
+        if PTERM:           
+            return RawANSICommand(0, 0, 0, PTERM.group("cmd"), PTERM.group("params")) #TelePath-specific Popup commands, etc.
+
+        if text == '\x1b\\':
+            return RawANSICommand(0, 0, 0, "0", "BLANK")
+
         else:
-            #TelePath-specific Popup commands, etc.
-            PTERM = RawANSICommand.PTERMCmd.match(text)
-            return RawANSICommand(0, 0, 0, PTERM.group("cmd"), PTERM.group("params"))
+            raise Exception(f"from_text(): cannot create an ANSI command from [{text}].")
             
     def __str__(self):  return (f"<{self.cmd}: {self.b1} {self.b2} {self.b3} => '{self.txt}'>")
 
@@ -397,6 +402,8 @@ class Connection():
         self.History = self.History[0: min(len(self.History), self.HISTORY_LENGTH)]
 
     def render_Screen(self):
+        self.hasErrors = False
+        self.Errors = []
         for currentIndex in range(0, len(self.ParsedANSI)):
             ANSICmd = self.ParsedANSI[currentIndex]
             self.CursorCol = ANSICmd.column
