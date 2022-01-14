@@ -10,9 +10,19 @@ import logging
 npexLogger = logging.getLogger(__name__)
 
 NPEX_ROOT_LINK = "https://lab2lab.xlab.this.nhs.uk/Orders/Show/WITH-"
-NPEX_LOGIN_LINK = "https://lab2lab.xlab.this.nhs.uk/login/authenticate"
+NPEX_LOGIN_LINK = "https://lab2lab.xlab.this.nhs.uk/login/authenticate/"
 NPEX_SESSION = requests.session()
 HAVE_LOGIN = False #TODO come up with better idea.
+
+l2l_headers = {
+    'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'Accept-Encoding':'gzip, deflate',
+    'Accept-Language':'en-US,en;q=0.9',
+    'Connection':'Keep-Alive',
+    'Upgrade-Insecure-Requests':'1',
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36',
+    'Host':'https://lab2lab.xlab.this.nhs.uk'
+    }
 
 
 class NPEX_Result():
@@ -39,6 +49,7 @@ class NPEX_Entry():
         self.AuditTrail = []
         self.Results = []
 
+
 def get_NPEX_login():
     global HAVE_LOGIN
     global NPEX_SESSION
@@ -47,8 +58,8 @@ def get_NPEX_login():
     NPEX_SESSION.get("https://lab2lab.xlab.this.nhs.uk/login")
     payload = {"username": config.LOCALISATION.NPEX_USER, "password": config.LOCALISATION.NPEX_PW, "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']}
     npexLogger.info("Logging into NPEX Web interface...")
-    result = NPEX_SESSION.post(NPEX_LOGIN_LINK, payload)
-    if result.status_code == 200:
+    result = NPEX_SESSION.post(NPEX_LOGIN_LINK, data=payload, headers=l2l_headers)
+    if result.status_code == 200 or result.status_code == 302:
         HAVE_LOGIN = True
         npexLogger.info("get_NPEX_login(): Complete.")
         #TODO: Check Result, raise exception if you get 403'd or time out.
@@ -86,6 +97,9 @@ def retrieve_NPEX_data(SampleID: str):
 
     if not HAVE_LOGIN:
         get_NPEX_login()
+
+    if not HAVE_LOGIN:
+        raise Exception("Cannot obtain NPEX login. Please retry or reprogram.")
         
     Sample_URL = NPEX_ROOT_LINK + quote_plus(SampleID)
     SampleData = NPEX_SESSION.get(Sample_URL)                                               # Retrieves the entire NPEX Webpage
@@ -146,3 +160,5 @@ def retrieve_NPEX_data(SampleID: str):
         #npexLogger.info(f"retrieve_NPEX_data(): No results available for sample [{SampleID}]; current status is [{currentStatus}].")
         NPEXSample.Results.append( NPEX_Result(SampleID, "N/A", currentStatus) )
     return(NPEXSample)
+
+#get_NPEX_login()

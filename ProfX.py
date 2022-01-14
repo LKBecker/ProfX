@@ -29,12 +29,13 @@ class tp_SpecimenID(datastructs.SampleID):
     def __init__(self, IDStr:str, Override:bool=False):
         datastructs.SampleID.__init__(self, IDStr, Override)
         #Prefix, Date Part, Number Part, Check Char
+        if IDStr == None:
+            raise Exception("tp_SpecimenID.__init__(): Received None where expecting IDstr.")
         self.Prefix     = "A,"
         self.Year       = None
         self.LabNumber  = None
         self.CheckChar  = None
         self.AsText     = ""
-
         IDStr = IDStr.upper()
         if IDStr[1]==",":
             self.Prefix = IDStr[:2]
@@ -165,8 +166,15 @@ class tp_Specimen(datastructs.Specimen):
             LastRetrieveIndex = 0
         DataChunks = sorted([x for x in ANSIChunks[LastRetrieveIndex+1:] if x.highlighted and x.deleteMode == 0 and x.line != 6])
         #get the LAST item that mentions the sample ID, which should be the TelePath refresh after "Retrieving data..."
-                
-        self._ID                = tp_SpecimenID(TelePath.chunk_or_none(DataChunks, line = 3, column = 17))
+        
+        specID                  = TelePath.chunk_or_none(DataChunks, line = 3, column = 17)
+        if specID:
+            self._ID                = tp_SpecimenID(specID)
+        else:
+            logging.error("from_chunks(): Could not isolate Patient name from line 3, column 17. Please check DataChunks.")
+            logging.debug(DataChunks)
+            raise Exception("Cannot (re)assign specimen ID.")
+
         self.PatientID          = TelePath.chunk_or_none(DataChunks, line = 8, column = 1)
         #TODO: put into PATIENT object (Search for existing patient, if not make new for Registration)
         #TODO: get patient ID (registration)
@@ -302,6 +310,8 @@ class tp_Patient(datastructs.Patient):
         TelePath.send('')
         TelePath.read_data()
         logging.info("tp_Specimen(s) found. Collecting data...")
+
+
 tp_Patient.Storage = datastructs.SingleTypeStorageContainer(tp_Patient)
 
 """Downloads lists of samples with one or more set(s) beyond their TAT from a named Section (default:AWAY). Optionally, filters for samples by Setcode"""
@@ -621,7 +631,7 @@ def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
     Patient = sample_to_patient(Sample)
     logging.info(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
     Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
-    complete_specimen_data_in_obj(Patient.Samples, GetFurther=False, FillSets=True, ValidateSamples=False, FilterSets=FilterSets)
+    complete_specimen_data_in_obj(Patient.Samples, GetNotepad=True, GetComments=True, GetFurther=False, ValidateSamples=False,  FillSets=True, FilterSets=FilterSets)
     logging.info("get_recent_history(): Writing to file...")
     datastructs.samples_to_file(Patient.Samples)
 
@@ -707,6 +717,8 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             continue
         if get_creators == True:
             #logging.info(f"aot_stub_buster(): Retrieving History for set [AOT] of sample [{AOTSample.ID}]")
+            #TODO: Seems like a source of errors when there is no history - check route back in case of error is similar 
+            #Or, brute force: go back to main menu and back to SENQ.
             TelePath.send(config.LOCALISATION.SETHISTORY+str(TargetIndex), quiet=True)  #Attempt to open test history, can cause error if none exists
             TelePath.read_data()
             if not TelePath.hasErrors:
@@ -732,10 +744,12 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             TelePath.send(config.LOCALISATION.RELEASE, quiet=True)                   #Release NA Result
             #TODO: Check if you get the comment of "Do you want to retain ranges"! Doesn't happen for AOT but...
             TelePath.read_data()
-            #TODO: Error(?) in screen rendered seems to shift the IDLine, which 'should' be 'Direct result entry Request <XXX>'
-            #if TelePath.Lines[2].split() #Direct result entry           Request: 
-            # if there's the interim screen, send another ''
+            if (TelePath.ScreenType == "DirectResultEntry"):
+                logging.debug("aot_stub_buster(): Using Direct result Entry screen shunt...")
+                TelePath.send(config.LOCALISATION.EMPTYSTR)
+                TelePath.read_data()
         TelePath.send(config.LOCALISATION.EMPTYSTR, quiet=True)                    #Close record
+        time.sleep(0.25)
     #for AOTSample
 
     if get_creators==True:
@@ -883,7 +897,7 @@ def patient_download(SampleID, FilterSets:list=None):
 
 """ Retrieves assay results for a list of Specimens.
     FilterSets: A list of strings, designating which """
-def mass_download(Samples:list=None, FilterSets:list=None):
+def mass_download(Samples:list=None, FilterSets:list=None, getNotepad=False, getComments=False):
     if not Samples:
         logging.info("mass_download(): No samples supplied, loading from file")
         with open("./ToRetrieve.txt", 'r') as DATA_IN:
@@ -892,7 +906,7 @@ def mass_download(Samples:list=None, FilterSets:list=None):
     logging.info(f"mass_download(): Begin download of {len(Samples)} samples.")
     if isinstance(Samples[0], str):
         Samples = [tp_Specimen(x.strip()) for x in Samples]
-    complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=False, GetComments=False)
+    complete_specimen_data_in_obj(Samples, FilterSets=FilterSets, FillSets=True, GetNotepad=getNotepad, GetComments=getComments)
     datastructs.samples_to_file(Samples)
     logging.info("mass_download(): Complete.")
 
@@ -931,7 +945,7 @@ def CLI():
     parser.add_argument('-test', help='Specifies the test to download')
     parser.add_argument('-user', help='Specifies the user to access the system as. Overrides config.py. Will require user to enter their password.')
 
-    #args = parser.parse_args()    
+    args = parser.parse_args()    
 
 def BasicInterface():
     def get_user_input(FilterFunction, FormatReminder, Prompt:str="Please make your selection: ", lowerBound=None, upperBound=None):
@@ -1097,20 +1111,20 @@ try:
     #==========
     #Data retrieval functions
     #==========
-    #recentSamples = get_recent_samples_of_set_type("ELAST", nMaxSamples=100) 
-    #mass_download(recentSamples, FilterSets=["ELAST"]) 
+    #recentSamples = get_recent_samples_of_set_type("ELAST", nMaxSamples=200) 
+    #mass_download(recentSamples, FilterSets=["ELAST"], getNotepad=False) 
     #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
     #mass_download(["A,15.4853930.B"])
-    #get_recent_history("A,21.7785884.D", nMaxSamples=10) #Gets up to 15 recent samples for the same patient as the given sample. Good to get a quick patient history.
-    #npex.retrieve_NPEX_data("A,21.7784000.W")
+    #get_recent_history("A,22.0065420.P", nMaxSamples=30) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
+    #npex.retrieve_NPEX_data("21.7767101.D")
 
     #==========
     #Auto-processing functions: Sendaways, AOT stubs, NPEX stragglers.
     #==========
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
-    #aot_stub_buster(insert_NA_result=False, get_creators=True) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
-    sendaways_scan() # Shows how many overdue sendaways there are
-    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+    #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
+    #sendaways_scan() # Shows how many overdue sendaways there are
+    sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
     #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
     #NPEX_Buster(Set="FCAL")
     

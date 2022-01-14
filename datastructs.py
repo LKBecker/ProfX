@@ -5,16 +5,16 @@ import config
 import datetime
 from itertools import chain
 import logging
+import utils
+import os.path
+import time
+
 #import matplotlib.pyplot as plt
 #import matplotlib as mpl
-import utils
 #plt.style.use('ggplot')
 #font = {'family' : 'monospace',
 #        'size'   : 8}
 #plt.rc('font', **font)  # pass in the font dict as kwargs
-
-import os.path
-import time
 
 datastructLogger = logging.getLogger(__name__)
 
@@ -378,6 +378,7 @@ class Patient():
             self.Samples.append(otherSample)
                             
     def create_plot(self, FilterAnalytes:list=None, firstDate:datetime.datetime=None, lastDate:datetime.datetime=None, nMinPoints:int=1):
+        raise NotImplementedError("create_plot(): Not implemented yet.")
         #TODO: Allow date limination? firstDate, lastDate, simple filter call when selecting Data
         Data = list(chain.from_iterable([x.Results for x in self.Samples]))
         Data = [x for x in Data if x.Value] #Remove results without value.
@@ -495,21 +496,27 @@ def samples_to_file(Samples:list, FilterSets = None):
                     OutStr = OutStr + "NA\tNA\t"
 
                 if sample.Received:
-                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M") + "\t"
+                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M")
                 else:
-                    OutStr = OutStr + "NA\tNA\t"
+                    OutStr = OutStr + "NA\tNA"
 
                 for _set in sample.Sets:
                     if FilterSets:
                         if _set.Code not in FilterSets: 
                             continue
+                    
                     if _set.Results:
+                        ComStr = ' '.join(_set.Comments)
                         for _result in _set.Results:
-                            ComStr = ' '.join(_set.Comments)
-                            DATA_OUT.write(f"{OutStr}{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit
-                    if sample.hasNotepadEntries == True:
-                        NPadStr = "|".join([str(x) for x in sample.NotepadEntries])
-                        DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t{NPadStr}\n")
+                            if _result.Flags:
+                                DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t{_result}\t{ComStr}\n") #_result calls str(), which returns Analyte\tValue\tUnit\tFlags
+                            else:
+                                DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t{_result}\t\t{ComStr}\n") #_result calls str(), needs an extra \t if there are no flags
+                    else:
+                        DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t\t\t\t\t\t\t\n") #_result calls str(), which returns Analyte\tValue\tUnit\tFlags
+            if sample.hasNotepadEntries == True:
+                NPadStr = "|".join([str(x) for x in sample.NotepadEntries])
+                DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t\t\t\t\t{NPadStr}\n")
 
 REF_RANGES = load_reference_ranges()
 
