@@ -5,11 +5,13 @@ LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
 import argparse
 from collections import Counter
+from functools import reduce
 import config
 import datastructs
 import datetime
 import getpass
 import logging
+import os.path
 import telnet_ANSI
 import npex
 import re
@@ -322,11 +324,11 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
     TelePath.send(Section)    # Section AUTOMATION
     TelePath.read_data() #tODO: should be replacing ..... with the thing sent. Based on.... position?
     TelePath.send('0', quiet=True)        # Send output to screen, which in this case is then parsed as our input stream
-    time.sleep(0.2)
+    time.sleep(0.5)
     Samples = []
     while TelePath.DefaultOption != "Q": # Parse overdue samples until there are none left to parse 
+        time.sleep(0.2)
         TelePath.read_data()
-        #if (len(TelePath.Lines)>5):
         if (TelePath.screenLength > 5):        # #Presence of non-empty lines after four lines of header implies there are list members to parse
             samples     = utils.process_whitespaced_table(TelePath.Lines[5:-2], utils.extract_column_widths(TelePath.Lines[3]))
             for sample in samples: 
@@ -342,9 +344,9 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
     TelePath.send('Q', quiet=True) #for completeness' sake, and so as to not block i guess
     if SetCode is not None: 
         Samples = [x for x in Samples if SetCode in x.SetCodes]
-        logging.info("get_overdue_sets(): Located %s overdue samples for section '%s' with Set '%s'." % (len(Samples), Section, SetCode))
+        logging.debug("get_overdue_sets(): Located %s overdue samples for section '%s' with Set '%s'." % (len(Samples), Section, SetCode))
     else:
-        logging.info("get_overdue_sets(): Located %s overdue samples for section '%s'" % (len(Samples), Section))
+        logging.debug("get_overdue_sets(): Located %s overdue samples for section '%s'" % (len(Samples), Section))
     return(Samples)
            
 """ Retrieves tp_Specimen data (demographics, etc) for any tp_Specimen object in the list SampleObjs.
@@ -629,7 +631,7 @@ def get_specimen_history(Samples:list):
 
 def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
     Patient = sample_to_patient(Sample)
-    logging.info(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
+    logging.debug(f"get_recent_history(): Retrieving recent samples for Patient [{Patient.ID}]")
     Patient.get_n_recent_samples(nMaxSamples=nMaxSamples)
     complete_specimen_data_in_obj(Patient.Samples, GetNotepad=True, GetComments=True, GetFurther=False, ValidateSamples=False,  FillSets=True, FilterSets=FilterSets)
     logging.info("get_recent_history(): Writing to file...")
@@ -681,6 +683,8 @@ def connect(TrainingSystem=False):
     
     while (TelePath.ScreenType != "MainMenu"):
         TelePath.read_data()
+        if (TelePath.ScreenType == "ChangePassword"):
+            raise Exception("TelePath demands a password change. Please log in using your regular client, change your password, then change the config file for this utility.")
         logging.debug(f"connect(): Screen type is {TelePath.ScreenType}, first lines are {TelePath.Lines[0:2]}")
         time.sleep(1) # Wait for ON-CALL? to go away
     logging.info("connect() Connection established. Login successful.")
@@ -688,18 +692,18 @@ def connect(TrainingSystem=False):
 """ Safely disconnects from the TelePath instance. """
 def disconnect():
     return_to_main_menu(ForceReturn=True)
-    logging.info("disconnect(): Disconnecting.")
+    logging.debug("disconnect(): Disconnecting.")
     TelePath.send('', readEcho=False)
     TelePath.send_raw(b'\x04', readEcho=False)         
 
 """ Locates samples with AOT beyond TAT (...i.e. any), and marks the AOT as 'NA' if insert_NA_result is set to True """
 def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> None:
-    logging.info(f"aot_stub_buster(): Start up. Gathering history: {get_creators}. NAing entries: {insert_NA_result}.")
+    logging.debug(f"aot_stub_buster(): Start up. Gathering history: {get_creators}. NAing entries: {insert_NA_result}.")
     AOTSamples = get_overdue_sets("AUTO", "AOT")
     AOTStubs = Counter()
     
     if (insert_NA_result == False and get_creators == False):
-        logging.info("aot_stub_buster() complete.")
+        logging.info(f"aot_stub_buster(): There are {len(AOTSamples)} AOTs to process.")
         return
 
     return_to_main_menu()
@@ -758,7 +762,7 @@ def aot_stub_buster(insert_NA_result:bool=False, get_creators:bool=False) -> Non
             AOTData.write("User\tNumber of AOT Stubs\n")
             for key, value in AOTStubs.most_common():
                 AOTData.write(f"{key}\t{value}\n")
-    logging.info("aot_stub_buster(): Complete.")
+    logging.debug("aot_stub_buster(): Complete.")
 
 """ Retrieves outstanding sendaway (section AWAY) samples. For each sample, retrieves specimen notepad contents, patient details, and any set comments. """
 def sendaways_scan(getDetailledData:bool=False) -> None:
@@ -924,11 +928,80 @@ def NPEX_Buster(Set:str="FIT"):
     logging.info(f"NPEX_Buster(): {len(CurrentSets)} samples found. Checking NPEx...")
     npex.retrieve_NPEX_samples(CurrentSets)
 
-def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0):
+def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
+    WYTH_AUTH_HEADER_SIZES = [ 4,13,40,45,53]
+    WYTH_NPCL_HEADER_SIZES = [12,21,52,61]
+
+    def processTwoColumnLines(lines):
+        #Limited to a max of 99 lists lol
+        cleanLists = []
+        for line in lines:
+            line = [x for x in line if x]
+            cleanLists.append((line[0][:2].strip(), line[1], line[2]))
+            if len(line)>3:
+                cleanLists.append((line[3][:2].strip(), line[4], line[5]))
+        return cleanLists
+
     return_to_main_menu()
-    QueueSize = 0
-    #TODO: 
-    logging.info(f"auth_queue_size(): There are {QueueSize} samples awaiting authorisation.")
+    ts = datetime.datetime.now()
+    NPCLQueues = []
+
+    TelePath.send(config.LOCALISATION.AUTHORISATION)
+    TelePath.read_data()
+    AuthQueues = TelePath.Lines[4].split("\r\n")[1:]
+    AuthQueues = utils.process_whitespaced_table(AuthQueues[1:], WYTH_AUTH_HEADER_SIZES)
+    #AuthQueues = [item for sublist in AuthQueues for item in sublist]
+    AuthQueues = processTwoColumnLines(AuthQueues)
+    for AuthQueue in AuthQueues:
+        if TelePath.ScreenType == "MainMenu":
+            #Received error?
+            TelePath.send(config.LOCALISATION.AUTHORISATION)
+            TelePath.read_data()
+        TelePath.send(AuthQueue[0]) #Received PowerTerm tmessage, args '"Number out of range" title "Authorisation list processing" error'
+        time.sleep(0.2)
+        TelePath.read_data()
+        NPCLLists = [x for x in TelePath.Lines[5:-4] if x]
+        NPCLLists = utils.process_whitespaced_table(NPCLLists, WYTH_NPCL_HEADER_SIZES)
+        _subQueue = []
+        for line in NPCLLists:
+            if len(line)%2 != 0: 
+                raise Exception("Number of items should be an even number!")
+            line = [x for x in line if x]
+            _subQueue.append((line[0], line[1]))
+            if len(line)>2:
+                _subQueue.append((line[2], line[3]))
+        for subQueue in _subQueue:
+            NPCLQueues.append( (AuthQueue[1], AuthQueue[2], subQueue[0], int(subQueue[1])) )
+        TelePath.send('Q')
+        time.sleep(0.2)
+        TelePath.read_data()
+    QueueSize = sum(item[3] for item in NPCLQueues)
+    logging.info(f"auth_queue_size(): {QueueSize} samples are awaiting authorisation at {ts}.")
+    
+    outFile = "./AuthQueues.txt"
+    
+
+    if writeToFile:
+        addHeader=False
+        if not os.path.exists(outFile):
+            addHeader = True
+        DATA_OUT = open(outFile, 'a')
+        if addHeader:
+            DATA_OUT.write("DateTime\tHead Queue\tSubqueue\tN Samples\n")
+    
+    if DetailLevel>0:
+        logging.info("Head Queue\tSubqueue\tN Samples")
+    
+    for subQueue in NPCLQueues:
+        dataStr = f"{subQueue[1]}\t{subQueue[2]}\t{subQueue[3]}"
+        if DetailLevel>0:
+            logging.info(dataStr)
+        if writeToFile:
+            DATA_OUT.write(f"{ts.strftime('%Y-%m-%d %H:%M:%S')}\t{dataStr}\n")
+
+    if writeToFile:
+        DATA_OUT.flush()
+        DATA_OUT.close()
 
 def CLI():
     parser = argparse.ArgumentParser(prog='TelePath', description='Connects to a TelePath LIMS system and extracts data.')
@@ -1092,6 +1165,13 @@ def BasicInterface():
 
     input("Press any key to exit...")
 
+def lab_status_report():
+    logging.info(" ### LAB STATUS REPORT ###")
+    aot_stub_buster()
+    sendaways_scan()
+    auth_queue_size()
+       
+
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
@@ -1117,16 +1197,18 @@ try:
     #mass_download(["A,15.4853930.B"])
     #get_recent_history("A,22.0065420.P", nMaxSamples=30) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
     #npex.retrieve_NPEX_data("21.7767101.D")
-
+    
     #==========
     #Auto-processing functions: Sendaways, AOT stubs, NPEX stragglers.
     #==========
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
     #sendaways_scan() # Shows how many overdue sendaways there are
-    sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
     #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
     #NPEX_Buster(Set="FCAL")
+    #auth_queue_size()
+    lab_status_report()
     
     #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
 

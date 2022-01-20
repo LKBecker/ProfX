@@ -13,6 +13,7 @@ class TelePath_Commands:
     ANSWERBACK: str
     NPEX_USER:str
     NPEX_PW:str
+    AUTHORISATION:str
     PATIENTENQUIRY: str
     SPECIMENENQUIRY: str
     UPDATE_SET_RESULT:str
