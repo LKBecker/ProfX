@@ -979,7 +979,6 @@ def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
     logging.info(f"auth_queue_size(): {QueueSize} samples are awaiting authorisation at {ts}.")
     
     outFile = "./AuthQueues.txt"
-    
 
     if writeToFile:
         addHeader=False
@@ -988,20 +987,15 @@ def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
         DATA_OUT = open(outFile, 'a')
         if addHeader:
             DATA_OUT.write("DateTime\tHead Queue\tSubqueue\tN Samples\n")
-    
-    if DetailLevel>0:
-        logging.info("Head Queue\tSubqueue\tN Samples")
-    
-    for subQueue in NPCLQueues:
-        dataStr = f"{subQueue[1]}\t{subQueue[2]}\t{subQueue[3]}"
-        if DetailLevel>0:
-            logging.info(dataStr)
-        if writeToFile:
-            DATA_OUT.write(f"{ts.strftime('%Y-%m-%d %H:%M:%S')}\t{dataStr}\n")
-
-    if writeToFile:
+        for subQueue in NPCLQueues:          
+            DATA_OUT.write(f"{ts.strftime('%Y-%m-%d %H:%M:%S')}\t{subQueue[1]}\t{subQueue[2]}\t{subQueue[3]}\n")
         DATA_OUT.flush()
         DATA_OUT.close()
+    
+    if DetailLevel>0:
+        AuthQueueTable = utils.generatePrettyTable(NPCLQueues, Headers=["Code", "Queue Name", "Sub-Queue", "Sets to authorise"])
+        for x in AuthQueueTable: 
+            logging.info(x)
 
 def CLI():
     parser = argparse.ArgumentParser(prog='TelePath', description='Connects to a TelePath LIMS system and extracts data.')
@@ -1169,8 +1163,51 @@ def lab_status_report():
     logging.info(" ### LAB STATUS REPORT ###")
     aot_stub_buster()
     sendaways_scan()
-    auth_queue_size()
+    auth_queue_size(DetailLevel=1)
        
+def get_rack_location(Samples, printTable=True, writeToFile=True):
+    #TODO: assert that Samples is a List of tp_Specimen or tp_SampleID
+    SampleLocStrs     = [["Sample", "Rack", "Row", "Column", "Stored"]]
+    if writeToFile:
+        LocDataIO = open(f'./SFS_Locations_{utils.timestamp(fileFormat=True)}.txt', 'w')
+        LocDataIO.write("\t".join(SampleLocStrs[0]))
+        LocDataIO.write('\n')
+
+    return_to_main_menu()
+    TelePath.send("SFS") #TODO Localise
+    TelePath.read_data()
+    TelePath.send("3") #TODO Localise
+    TelePath.read_data()
+    for sample in Samples:
+        if isinstance(sample, tp_Specimen):
+            _sample = sample.ID
+        else:
+            _sample = str(sample)
+
+        TelePath.send(_sample)
+        TelePath.read_data()
+        
+        #There's an erase instruction at the end, so instead of parsing the final screen we will have to grab the raw ANSI codes...
+        StoredSamplesANSI = [x for x in TelePath.ParsedANSI if x.line >= 10 and x.deleteMode == 0]
+        StoredSampleLines = list(set([x.line for x in StoredSamplesANSI])) #Get unique line number(s)
+
+        for line in StoredSampleLines:
+            lineItems = [x for x in StoredSamplesANSI if x.line == line]
+            StorageLoc = [x for x in lineItems if x.column == 1][0].text
+            StorageRow = [x for x in lineItems if x.column == 43][0].text
+            StorageCol = [x for x in lineItems if x.column == 48][0].text
+            StorageDT  = [x for x in lineItems if x.column == 56][0].text
+            subStr = [_sample, StorageLoc, StorageRow, StorageCol, StorageDT]
+            if writeToFile:
+                LocDataIO.write(f"{_sample}\t{StorageLoc}\t{StorageRow}\t{StorageCol}\t{StorageDT}\n")
+            SampleLocStrs.append(subStr)
+
+    if writeToFile:
+        LocDataIO.flush()
+        LocDataIO.close()
+        
+    if printTable:
+        utils.generatePrettyTable(SampleLocStrs, printTable=True)
 
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
@@ -1191,26 +1228,26 @@ try:
     #==========
     #Data retrieval functions
     #==========
-    #recentSamples = get_recent_samples_of_set_type("ELAST", nMaxSamples=200) 
-    #mass_download(recentSamples, FilterSets=["ELAST"], getNotepad=False) 
+    #recentSamples = get_recent_samples_of_set_type("FK506", nMaxSamples=210) 
+    #mass_download(recentSamples, FilterSets=["FK506"], getNotepad=False) 
     #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
-    #mass_download(["A,15.4853930.B"])
-    #get_recent_history("A,22.0065420.P", nMaxSamples=30) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
+    #mass_download(["A,22.0100062.Q", "A,22.0097636.K"])
+    #get_recent_history("A,22.4417164.A", nMaxSamples=30) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
     #npex.retrieve_NPEX_data("21.7767101.D")
-    
+    #get_rack_location(["22.0107743.M", "22.0098413.B", "22.0106865.A", "22.0101155.H", "22.0097636.K"])
+
     #==========
     #Auto-processing functions: Sendaways, AOT stubs, NPEX stragglers.
     #==========
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
     #sendaways_scan() # Shows how many overdue sendaways there are
-    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+    sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
     #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
     #NPEX_Buster(Set="FCAL")
-    #auth_queue_size()
-    lab_status_report()
-    
-    #visualise("A,21.0676517.Z", nMaxSamples=15) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
+    auth_queue_size(DetailLevel=1)
+    #lab_status_report()
+    #visualise("A,22.0093756.G", nMaxSamples=10) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
 
 except Exception as e: 
     logging.error(e)

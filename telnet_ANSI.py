@@ -362,7 +362,8 @@ class Connection():
                 
             elif RawANSIChunk.cmdByte == 'J': #Erase in Display 
                 if RawANSIChunk.b1 > 2: telnetLogger.error("Encountered an Erase in Display command with a byte1 value greater than 2 in RawANSI.parse(). This violates the ANSI standard; check parsing")
-                _delRawANSIChunk = ParsedANSICommand(currentLine, max(currentColumn,0), "", False, 2, RawANSIChunk.b1) # If RawANSIChunk.txt isn't nothing, we will append a 'fake' textRawANSIChunk lower down.
+                _delRawANSIChunk = ParsedANSICommand(line=currentLine, column=max(currentColumn,0), text="", highlighted=False, deleteMode=2, deleteTarget=RawANSIChunk.b1) 
+                # If RawANSIChunk.txt isn't nothing, we will append a 'fake' textRawANSIChunk lower down.
                 _ParsedANSI.append(_delRawANSIChunk)
 
             elif RawANSIChunk.cmdByte == 'K': #Erase in Line
