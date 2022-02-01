@@ -1,6 +1,6 @@
 #GPL-3.0-or-later
 
-VERSION = "1.8.3"
+VERSION = "1.8.5"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
 import argparse
@@ -28,8 +28,8 @@ class tp_SpecimenID(datastructs.SampleID):
     CHECK_INT = 23
     CHECK_LETTERS = ['B', 'W', 'D', 'F', 'G', 'K', 'Q', 'V', 'Y', 'X', 'A', 'S', 'T', 'N', 'J', 'H', 'R', 'P', 'L', 'C', 'Z', 'M', 'E']
 
-    def __init__(self, IDStr:str, Override:bool=False):
-        datastructs.SampleID.__init__(self, IDStr, Override)
+    def __init__(self, IDStr:str, useLocalisationValidationFun:bool=False):
+        datastructs.SampleID.__init__(self, IDStr, useLocalisationValidationFun)
         #Prefix, Date Part, Number Part, Check Char
         if IDStr == None:
             raise Exception("tp_SpecimenID.__init__(): Received None where expecting IDstr.")
@@ -38,6 +38,7 @@ class tp_SpecimenID(datastructs.SampleID):
         self.LabNumber  = None
         self.CheckChar  = None
         self.AsText     = ""
+        self.useLocalisationValidationFun = useLocalisationValidationFun
         IDStr = IDStr.upper()
         if IDStr[1]==",":
             self.Prefix = IDStr[:2]
@@ -106,9 +107,7 @@ class tp_SpecimenID(datastructs.SampleID):
             logging.debug(f"SampleID(): ID parsing failed for {IDStr}.")
 
     def __str__(self) -> str:
-        if self.LabNumber:
-            return f"{self.Year}.{self.LabNumber:07}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
-        return f"{self.Year}.{self.LabNumber}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
+        return f"{self.Year}.{self.LabNumber:07}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
 
     def __repr__(self) -> str:
         return(f"SampleID(\"A,{self.Year}.{self.LabNumber}.{self.CheckChar}\")")
@@ -119,7 +118,7 @@ class tp_SpecimenID(datastructs.SampleID):
         assert self.LabNumber
         assert self.CheckChar
 
-        if self.Override:
+        if self.useLocalisationValidationFun: #TODO: test
             return config.LOCALISATION.check_sample_id(self.AsText)
 
         sID = str(self).replace(".", "")
@@ -171,12 +170,9 @@ class tp_Specimen(datastructs.Specimen):
         
         specID                  = TelePath.chunk_or_none(DataChunks, line = 3, column = 17)
         if specID:
-            self._ID                = tp_SpecimenID(specID)
-        else:
-            logging.error("from_chunks(): Could not isolate Patient name from line 3, column 17. Please check DataChunks.")
-            logging.debug(DataChunks)
-            raise Exception("Cannot (re)assign specimen ID.")
-
+            if self._ID != tp_SpecimenID(specID):
+                logging.warning(f"WARNING: Mismatch between assigned specimen ID {self._ID} and retrieved ID {specID}!")
+        
         self.PatientID          = TelePath.chunk_or_none(DataChunks, line = 8, column = 1)
         #TODO: put into PATIENT object (Search for existing patient, if not make new for Registration)
         #TODO: get patient ID (registration)
@@ -263,20 +259,21 @@ class tp_Patient(datastructs.Patient):
             tp_Patient.Storage[self.ID] = self #Should overwrite (well, re-link) duplicate object with existing one?
             del(other)
 
-    def get_n_recent_samples(self, nMaxSamples:int=10):
+
+    def get_n_recent_samples(self, Set=None, nMaxSamples:int=10, retrieveContents:bool=False):
         def extract_specimens(samples):
             for sample in samples: #Max seven per page
-                _tmptp_Specimen = tp_Specimen(sample[2]) #Should auto-append to self.Samples?
-                self.add_sample(_tmptp_Specimen)
-                ntp_Specimens = len(self.Samples)
-                #logging.debug(f"get_n_recent_samples(): Patient {self.ID} now contains {ntp_Specimens} specimens.")
-                if ntp_Specimens == nMaxSamples+1: #len() is index 0!
+                _tmpSpecimen = tp_Specimen(sample[2]) #Should auto-append to self.Samples?
+                self.add_sample(_tmpSpecimen)
+                nSpecimens = len(self.Samples)
+                logging.debug(f"get_n_recent_samples(): Patient {self.ID} now contains {nSpecimens} specimens.")
+                if nSpecimens == nMaxSamples+1: #len() is index 0!
                     return False
             return True
 
         if not self.ID or not self.LName:
             logging.error(f"Either Patient ID ({self.ID}) or First Name ({self.LName}) not sufficient to search for samples. Aborting.")
-            return
+            return False
         return_to_main_menu()
         TelePath.send(config.LOCALISATION.PATIENTENQUIRY)
         TelePath.read_data()
@@ -293,25 +290,46 @@ class tp_Patient(datastructs.Patient):
                 TelePath.send(self.FName[:1])
                 TelePath.read_data()
             TelePath.send("S") #Spec select
+            TelePath.read_data()
             TelePath.send("U") #Unknown specimen
+            TelePath.read_data()
             TelePath.send('', readEcho=False) #EARLIEST
             TelePath.read_data() 
             TelePath.send('', readEcho=False) #LATEST
             TelePath.read_data()
-            TelePath.send('', readEcho=False) #ALL
+            if not Set:
+                TelePath.send('', readEcho=False) #ALL
+            else:
+                TelePath.send(Set) #Send desired set
             TelePath.read_data() #Get specimen table
-            
-            while TelePath.DefaultOption == "N":
+            if TelePath.hasErrors:
+                #TODO: Crashes sister sample retrieval. Why?
+                return
+            _continueLoop = True
+            samples = utils.process_whitespaced_table(TelePath.Lines[14:-2], utils.extract_column_widths(TelePath.Lines[12]))
+            if not extract_specimens(samples):
+                _continueLoop = False
+            while TelePath.DefaultOption == "N" and _continueLoop:
+                TelePath.send('N')
+                TelePath.read_data()
                 samples = utils.process_whitespaced_table(TelePath.Lines[14:-2], utils.extract_column_widths(TelePath.Lines[12]))
                 if not extract_specimens(samples):
                     break
-                TelePath.send('N')
-                TelePath.read_data()
-            TelePath.send('Q')
+            
+        #TODO: else, do search via Name and DOB?
+        else:
+            logging.error(f"Could not retrieve data for patient {self.ID}: {';'.join(TelePath.Errors)}")
+        TelePath.send('Q')
         TelePath.read_data()
         TelePath.send('')
         TelePath.read_data()
-        logging.info("tp_Specimen(s) found. Collecting data...")
+        if retrieveContents:
+            tmpSets = None
+            if Set:
+                tmpSets = [Set]
+            complete_specimen_data_in_obj(self.Samples, GetNotepad=True, GetComments=True, FillSets=True, FilterSets=tmpSets)
+
+        logging.info("tp_Specimen(s) found.")
 
 
 tp_Patient.Storage = datastructs.SingleTypeStorageContainer(tp_Patient)
@@ -430,12 +448,12 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     SampleCounter = 0
     nSamples = len(SampleObjs)
     ReportInterval = max(min(250, int(nSamples*0.1)), 1)
-    logging.info(f"complete_specimen_data_in_obj(): Beginning retrieval...")
+    logging.debug(f"complete_specimen_data_in_obj(): Beginning retrieval...")
     for Sample in SampleObjs: 
         if Sample.ID[:1] == "19":
             logging.info("complete_specimen_data_in_obj(): Avoiding specimen(s) from 2019, which can induce a crash on access.")    
             continue
-        #logging.info(f"complete_specimen_data_in_obj(): Retrieving specimen [{Sample.ID}]...")
+        logging.debug(f"complete_specimen_data_in_obj(): Retrieving specimen [{Sample.ID}]...")
         if (ValidateSamples and not Sample.validate_ID()):
             logging.warning("complete_specimen_data_in_obj(): Sample ID '%s' does not appear to be valid. Skipping to next..." % Sample.ID)
             continue
@@ -443,9 +461,9 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         TelePath.read_data(max_wait=400)   # And read screen.
         if (TelePath.hasErrors == True):
             # Usually the error is "No such specimen"; the error shouldn't be 'incorrect format' if we ran validate_ID().
-            logging.warning(f"complete_specimen_data_in_obj(): '%s'" % ";".join(TelePath.Errors))
+            logging.warning(f"complete_specimen_data_in_obj(): '{';'.join(TelePath.Errors)}'")
         else:
-            _SetCodes = Sample.SetCodes
+            _SetCodes = Sample.SetCodes #...blank list? TODO:check
             Sample.from_chunks(TelePath.ParsedANSI)  #Parse sample data, including patient details, sets, and assigning tp_Specimen.Collected DT.
             if FillSets == False:
                 Sample.Sets = [x for x in Sample.Sets if x.Code in _SetCodes]
@@ -465,7 +483,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                             _entryData = entryLine.text.split(" ")
                             _entryData = [x for x in _entryData if x != ""]
                             if len(_entryData) > 5:
-                                #todo: this never procced, ensure it works
+                                #TODO: this never yet happened, ensure it works
                                 logging.debug("There are likely two specimen notepad entries in line '%s'" % entryLine)
                                 SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[7], _entryData[6], "", _entryData[5].strip(")"), _entryData[8]+" "+_entryData[9])) #THEORETICAL - not tested yet
                             SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[2], _entryData[1], "", _entryData[0].strip(")"), _entryData[3]+" "+_entryData[4]))
@@ -540,11 +558,11 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         # if/else TelePath.hasError()
         SampleCounter += 1
         Pct = (SampleCounter / nSamples) * 100
-        if( SampleCounter % ReportInterval == 0): 
+        if(SampleCounter % ReportInterval == 0): 
             logging.info(f"complete_specimen_data_in_obj(): {SampleCounter} of {nSamples} samples ({Pct:.2f}%) complete")
     time.sleep(0.1)
     #for Sample in Samples
-    logging.info("complete_specimen_data_in_obj(): All downloads complete.")
+    logging.debug("complete_specimen_data_in_obj(): All downloads complete.")
 
 """ Supposed to retrieve the most recent n samples with a specified set, via SENQ"""
 def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, LastDate:datetime.datetime=None, nMaxSamples:int=50) -> list:
@@ -637,12 +655,15 @@ def get_recent_history(Sample:str, nMaxSamples:int=15, FilterSets:list=None):
     logging.info("get_recent_history(): Writing to file...")
     datastructs.samples_to_file(Patient.Samples)
 
-def sample_to_patient(Sample:str):
-    _tmpSample = tp_Specimen(Sample)
+def sample_to_patient(Sample:str) -> tp_Patient:
+    if isinstance(Sample, tp_Specimen):
+        _tmpSample = Sample
+    else:
+        _tmpSample = tp_Specimen(Sample)
     if not _tmpSample.validate_ID():
         logging.info(f"sample_to_patient(): {Sample} is not a valid specimen ID. Abort.")
         return
-    complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True) #Gets patient data from SENQ
+    complete_specimen_data_in_obj(_tmpSample, GetFurther=False, FillSets=True) #Gets patient data via SENQ
     return tp_Patient.Storage[_tmpSample.PatientID] # Return patient obj
 
 """ Attempts to return to the main menu by repeatedly writing ESCAPE or EMPTY commands until the main screen is reached."""
@@ -1209,6 +1230,30 @@ def get_rack_location(Samples, printTable=True, writeToFile=True):
     if printTable:
         utils.generatePrettyTable(SampleLocStrs, printTable=True)
 
+def get_recent_sister_result(Samples, SetFilter, Analyte):
+    #TODO: retrieve current sample from Patient, get SampleTaken, do time comparison + distance in days/hours
+    #TODO: Sort? samples to get... well, most recent one _should_ always be first but don't trust TelePath.
+    recentSisterSamples = []
+    for sample in Samples:
+        Patient = sample_to_patient(sample)
+        Patient.get_n_recent_samples(Set=SetFilter, nMaxSamples=1, retrieveContents=True)
+        if Patient.Samples:
+            tmpSets = [Sample.Sets for Sample in Patient.Samples]
+            if tmpSets:
+                #TODO: Isolate sister sample
+                tmpSets = [Set.Results for SampleSets in tmpSets for Set in SampleSets if Set.Code == SetFilter]
+                if tmpSets:
+                    tmpSets = [SetResult for SetResult in tmpSets for SetResult in SetResult if SetResult.Analyte == Analyte][0]
+                    recentSisterSamples.append( [sample, tmpSets.Analyte, tmpSets.Value, tmpSets.Units, tmpSets.SampleTaken.strftime("%Y/%m/%d, %H:%M:%S")] )
+    sisterSampleHeaders = ["Current Sample", "Sister Sample" "Analyte", "Value", "Units", "Sample Taken"]
+    with open(f"./{utils.timestamp(fileFormat=True)}_SisterSamples.txt", 'w') as IO:
+        IO.write('\t'.join(sisterSampleHeaders))
+        IO.write('\n')
+        for item in recentSisterSamples:
+            IO.write('\t'.join(str(item)))
+            IO.write('\n')
+    utils.generatePrettyTable(recentSisterSamples, Headers=sisterSampleHeaders, printTable=True)
+
 logging.basicConfig(filename='./debug.log', filemode='w', level=logging.DEBUG, format=LOGFORMAT)
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
@@ -1228,11 +1273,28 @@ try:
     #==========
     #Data retrieval functions
     #==========
-    #recentSamples = get_recent_samples_of_set_type("FK506", nMaxSamples=210) 
-    #mass_download(recentSamples, FilterSets=["FK506"], getNotepad=False) 
+    #mass_download(get_recent_samples_of_set_type("FK506", nMaxSamples=210), FilterSets=["FK506"], getNotepad=False) #FilterSets means only the specified sets are retrieved
     #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
-    #mass_download(["A,22.0100062.Q", "A,22.0097636.K"])
-    #get_recent_history("A,22.4417164.A", nMaxSamples=30) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
+    ReninALDOSamples = ["22.0070714.L", "22.0070949.X", "22.4403542.M", "22.4402775.S", "22.4402793.X", 
+                    "22.4402838.N", "22.4403832.S", "22.4401819.B", "22.4401818.J", "22.4406052.T", 
+                    "22.4401879.D", "22.4406285.Y", "22.4406348.A", "22.0088894.G", "22.0088903.E", 
+                    "22.0088917.Z", "22.4406511.Q", "22.4406504.D", "22.4406506.Z", "22.4406507.Q", 
+                    "22.4406508.H", "22.4406509.W", "22.4406510.Z", "22.0089936.A", "22.4406576.V", 
+                    "22.4406577.R", "22.4406578.D", "22.4406613.Y", "22.4406614.P", "22.4406619.R", 
+                    "22.4406629.W", "22.4406630.Z", "22.4406688.P", "22.4411065.E", "22.4411064.N", 
+                    "22.4406732.E", "22.4406721.K", "22.4406722.J", "22.4406723.B", "22.4406724.X", 
+                    "22.4406725.L", "22.4406726.G", "22.4406727.N", "22.4411094.J", "22.4411096.X", 
+                    "22.4411079.Z", "22.4411080.R", "22.4411092.C", "22.4411093.K", "22.4411091.A", 
+                    "22.4411089.K", "22.4411090.W", "22.4411078.S", "22.4411077.D", "22.4411075.V", 
+                    "22.4411076.R", "22.4406692.P", "22.4411104.L", "22.4406734.P", "22.4406735.F", 
+                    "22.4406736.T", "22.4406737.M", "22.4406738.V", "22.4406739.R", "22.4406746.Z", 
+                    "22.4406747.Q", "22.4406748.H", "22.4411224.L", "22.4406912.Z", "22.4406906.D", 
+                    "22.4406908.Z", "22.4406909.Q", "22.4411232.Y", "22.4411229.P", "22.4410146.R", 
+                    "22.4410147.D", "22.4410148.S", "22.4406913.Q", "22.4406948.Q", "22.4406949.H"]
+    #mass_download(ReninALDOSamples, FilterSets=["ALDO1", "E2"])
+    #get_recent_sister_result(ReninALDOSamples, "E2", "K")
+    
+    #get_recent_history("22.0119928.T", nMaxSamples=24) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
     #npex.retrieve_NPEX_data("21.7767101.D")
     #get_rack_location(["22.0107743.M", "22.0098413.B", "22.0106865.A", "22.0101155.H", "22.0097636.K"])
 
@@ -1242,12 +1304,13 @@ try:
     #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
     #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
     #sendaways_scan() # Shows how many overdue sendaways there are
-    sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+    #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
     #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
     #NPEX_Buster(Set="FCAL")
     auth_queue_size(DetailLevel=1)
     #lab_status_report()
     #visualise("A,22.0093756.G", nMaxSamples=10) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
+    pass
 
 except Exception as e: 
     logging.error(e)

@@ -8,22 +8,17 @@ import requests
 import logging
 
 npexLogger = logging.getLogger(__name__)
-
 NPEX_ROOT_LINK = "https://lab2lab.xlab.this.nhs.uk/Orders/Show/WITH-"
 NPEX_LOGIN_LINK = "https://lab2lab.xlab.this.nhs.uk/login/authenticate/"
 NPEX_SESSION = requests.session()
 HAVE_LOGIN = False #TODO come up with better idea.
 
-l2l_headers = {
-    'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-    'Accept-Encoding':'gzip, deflate',
-    'Accept-Language':'en-US,en;q=0.9',
-    'Connection':'Keep-Alive',
-    'Upgrade-Insecure-Requests':'1',
-    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.111 Safari/537.36',
-    'Host':'https://lab2lab.xlab.this.nhs.uk'
-    }
-
+if __name__ =="__main__":
+    LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter(LOGFORMAT))
+    logging.getLogger().addHandler(console)
 
 class NPEX_Result():
     def __init__(self, SampleID, Set:str="", Status:str="", Value:str="", Range:str="", Units:str="", Flags:str="", Comments:list=None):
@@ -58,10 +53,11 @@ def get_NPEX_login():
     NPEX_SESSION.get("https://lab2lab.xlab.this.nhs.uk/login")
     payload = {"username": config.LOCALISATION.NPEX_USER, "password": config.LOCALISATION.NPEX_PW, "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']}
     npexLogger.info("Logging into NPEX Web interface...")
-    result = NPEX_SESSION.post(NPEX_LOGIN_LINK, data=payload, headers=l2l_headers)
+    result = NPEX_SESSION.post(NPEX_LOGIN_LINK, data=payload)
     if result.status_code == 200 or result.status_code == 302:
         HAVE_LOGIN = True
         npexLogger.info("get_NPEX_login(): Complete.")
+
         #TODO: Check Result, raise exception if you get 403'd or time out.
     else:
         raise Exception("get_NPEX_login(): Status code is not 200, could not retrieve session. Check login details and connection.")
@@ -102,7 +98,10 @@ def retrieve_NPEX_data(SampleID: str):
         raise Exception("Cannot obtain NPEX login. Please retry or reprogram.")
         
     Sample_URL = NPEX_ROOT_LINK + quote_plus(SampleID)
-    SampleData = NPEX_SESSION.get(Sample_URL)                                               # Retrieves the entire NPEX Webpage
+    payload = { "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken'], 
+                "NPExAuth": NPEX_SESSION.cookies['NPExAuth'],
+                "__ControllerTempData": NPEX_SESSION.cookies['__ControllerTempData']}
+    SampleData = NPEX_SESSION.get(Sample_URL, data=payload)                                               # Retrieves the entire NPEX Webpage
     NPEXSample = NPEX_Entry(SampleID=SampleID)
     if SampleData.status_code != 200:
         if SampleData.status_code == 400:
@@ -118,18 +117,18 @@ def retrieve_NPEX_data(SampleID: str):
             npexLogger.info(f"retrieve_NPEX_data(): NPEX answered with code [{SampleData.status_code}]. Your request could not be compledted.")
             raise Exception(f"retrieve_NPEX_data(): [{SampleData.status_code}] for sample [{SampleID}], user [{config.LOCALISATION.NPEX_USER}].")
 
-    
-
     SampleDataSoup = BeautifulSoup(SampleData.text, 'html.parser')                          # Turns it into soup (a parsed tree of HTML elements more easily traversable)
-    
+
     SpecimenTable = SampleDataSoup.find("table", id="specimen")                             # Information about the Specimen is logged in a table with id 'specimen'
+    if not SpecimenTable:
+        raise Exception("Could not find specimen table.")
     NPEXSample.PerformingLabID = SpecimenTable.findAllNext("tr")[1].p.text.split("\r\n")[2].strip()    # Such as the performing lab number (if assigned)
     AuditHistory  = SpecimenTable.findNext("ul", class_="test-side")                   # And low-level audit history (if present/completed).
     # There -is- an option to retrieve a full audit trail but nobody's requested that. Also it involved javascript so... let's not do that.
+
     for AuditItem in AuditHistory.findAllNext("span", class_="state-icon-header"):
         NPEXSample.AuditTrail.append( (AuditItem.text.strip(), AuditItem.attrs['title']) )                   # Here, we make tuples with (timestamp, action) for the audit trail
-       
-
+    
     # results are in a <table> of class results. :)
     ResultsTable = SampleDataSoup.find("table", class_="results")      
     if ResultsTable:                     
@@ -162,3 +161,4 @@ def retrieve_NPEX_data(SampleID: str):
     return(NPEXSample)
 
 #get_NPEX_login()
+#retrieve_NPEX_data("21.7767101.D")
