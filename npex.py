@@ -8,15 +8,20 @@ import requests
 import logging
 
 npexLogger = logging.getLogger(__name__)
-NPEX_ROOT_LINK = "https://lab2lab.xlab.this.nhs.uk/Orders/Show/WITH-"
-NPEX_LOGIN_LINK = "https://lab2lab.xlab.this.nhs.uk/login/authenticate/"
+NPEX_ROOT_LINK = "https://lab2lab.xlab.this.nhs.uk/"
+NPEX_LOGIN_LINK = NPEX_ROOT_LINK + "https://lab2lab.xlab.this.nhs.uk/login/authenticate/"
+NPEX_DATA_LINK = NPEX_ROOT_LINK + "Orders/Show/WITH-"
+NPEX_SEARCH_LINK = NPEX_ROOT_LINK + ""
+
 NPEX_SESSION = requests.session()
 HAVE_LOGIN = False #TODO come up with better idea.
 
-if __name__ =="__main__":
+if __name__ == "__main__":
+    import sys
     LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=LOGFORMAT) #redirects logging to stdout
     console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
+    console.setLevel(logging.DEBUG)
     console.setFormatter(logging.Formatter(LOGFORMAT))
     logging.getLogger().addHandler(console)
 
@@ -50,12 +55,15 @@ def get_NPEX_login():
     global NPEX_SESSION
     #Is NPEX_SESSION currnet/acitve? if no...
     npexLogger.info("get_NPEX_login(): Opening session.")
-    NPEX_SESSION.get("https://lab2lab.xlab.this.nhs.uk/login")
+    NPEX_SESSION.get("https://lab2lab.xlab.this.nhs.uk/login", timeout=30)
     payload = {"username": config.LOCALISATION.NPEX_USER, "password": config.LOCALISATION.NPEX_PW, "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']}
     npexLogger.info("Logging into NPEX Web interface...")
     result = NPEX_SESSION.post(NPEX_LOGIN_LINK, data=payload)
     if result.status_code == 200 or result.status_code == 302:
+        #TODO: get NPExAuth cookie!
         HAVE_LOGIN = True
+        print(NPEX_SESSION.cookies.get_dict()) # r.cookies._cookies which is a dictionary whose keys are [<domain>][<path>]
+        debugCookies = [ {'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path} for c in NPEX_SESSION.cookies ]
         npexLogger.info("get_NPEX_login(): Complete.")
 
         #TODO: Check Result, raise exception if you get 403'd or time out.
@@ -98,9 +106,7 @@ def retrieve_NPEX_data(SampleID: str):
         raise Exception("Cannot obtain NPEX login. Please retry or reprogram.")
         
     Sample_URL = NPEX_ROOT_LINK + quote_plus(SampleID)
-    payload = { "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken'], 
-                "NPExAuth": NPEX_SESSION.cookies['NPExAuth'],
-                "__ControllerTempData": NPEX_SESSION.cookies['__ControllerTempData']}
+    payload = { "__RequestVerificationToken": NPEX_SESSION.cookies['__RequestVerificationToken']} 
     SampleData = NPEX_SESSION.get(Sample_URL, data=payload)                                               # Retrieves the entire NPEX Webpage
     NPEXSample = NPEX_Entry(SampleID=SampleID)
     if SampleData.status_code != 200:
@@ -121,8 +127,8 @@ def retrieve_NPEX_data(SampleID: str):
 
     SpecimenTable = SampleDataSoup.find("table", id="specimen")                             # Information about the Specimen is logged in a table with id 'specimen'
     if not SpecimenTable:
-        raise Exception("Could not find specimen table.")
-    NPEXSample.PerformingLabID = SpecimenTable.findAllNext("tr")[1].p.text.split("\r\n")[2].strip()    # Such as the performing lab number (if assigned)
+        raise Exception("Could not find specimen table. Was a webpage retrieved?")
+    NPEXSample.PerformingLabID = SpecimenTable.findAllNext("tr")[1].p.text.split("\r\n")[2].strip()    # Such as the specimen ID at the performing lab lab number (if assigned)
     AuditHistory  = SpecimenTable.findNext("ul", class_="test-side")                   # And low-level audit history (if present/completed).
     # There -is- an option to retrieve a full audit trail but nobody's requested that. Also it involved javascript so... let's not do that.
 
@@ -160,5 +166,20 @@ def retrieve_NPEX_data(SampleID: str):
         NPEXSample.Results.append( NPEX_Result(SampleID, "N/A", currentStatus) )
     return(NPEXSample)
 
-#get_NPEX_login()
-#retrieve_NPEX_data("21.7767101.D")
+
+if __name__ == "__main__":
+    get_NPEX_login()
+    retrieve_NPEX_data("21.0813761.F")
+
+    VitsAE = [  "21.0813761.F", "21.0916611.W", "21.0760460.E", "21.0957616.F", "21.0833724.Y", 
+                "21.0795603.J", "21.0817181.W", "21.0804830.W", "21.0948997.Q", "22.0093139.C", 
+                "21.0757762.Q", "21.0817202.E", "22.0100944.D", "21.0757571.J", "21.0743401.J", 
+                "22.0108245.A", "21.0813751.L", "22.7702826.Y", "22.0090457.Z", "22.0083143.J", 
+                "22.0092365.H", "21.0857646.B", "21.0026800.N", "21.7792117.F", "21.7792118.T", 
+                "21.7787926.J", "22.0050302.B", "22.0100803.B", "22.0116632.C", "21.0760477.W", 
+                "22.0090443.E", "21.0859229.L", "22.0090469.B", "21.0891368.Z", "22.0116651.F", 
+                "21.0798654.T", "21.7739971.C", "21.7792116.P", "21.0858661.B", "22.4413866.V", 
+                "21.7789359.T", "22.0058268.K", "22.0095182.Y", "21.0907651.S", "21.3214580.A", 
+                "22.0097712.Q", "21.0840943.R", "21.0798697.D", "21.7792316.Y", "21.0804383.A", 
+                "22.0080407.M", "22.0093190.X", "22.0113841.J"]
+    #retrieve_NPEX_samples(VitsAE)

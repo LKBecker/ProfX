@@ -115,16 +115,12 @@ class RawANSICommand():
         'X' : "Self-appended chunk - telnet read wrong?"
         }
 
-    #TODO: not currently fit for purpose. Needs to...
-    #Have a progressive parser? Like, iterate through the body of the tag (everything not text; redefine)
     def __init__(self, byte1, byte2, byte3, cmd, text, is_private=False):
         def try_numeric(item):
             try:
                 return int(item) if item else 0
             except:
                 return item
-                #return int(hex(ord(item)).lstrip("0x")) #TODO: repent for this
-                #TODO: honestly why not just store the raw value of the byte and then convert to a bsae10 number when you expect a number
 
         self.b1 = try_numeric(byte1)
         self.b2 = try_numeric(byte2)
@@ -151,7 +147,7 @@ class RawANSICommand():
             ANSIBytes = nF.group("Prm_Bytes").split(";")
             ANSIBytes = [x for x in ANSIBytes if x]
             while (len(ANSIBytes)<3): ANSIBytes.append('0')
-            return RawANSICommand(nF.group("FinalByte"), 0, 0, ")", text[len(nF.group(0)):]) #TODO test.
+            return RawANSICommand(nF.group("FinalByte"), 0, 0, ")", text[len(nF.group(0)):])
 
         PTERM = RawANSICommand.PTERMCmd.match(text)
         if PTERM:           
@@ -329,7 +325,7 @@ class Connection():
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
         if (firstANSICodePos > 0): 
-            telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code")
+            telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code. Did you miss a read_data()?")
             telnetLogger.debug(f"Raw text is '{workingText}'")
             workingText = workingText[firstANSICodePos:]
 

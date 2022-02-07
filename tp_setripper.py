@@ -1,13 +1,15 @@
 #GPL-3.0-or-later
 
+from ProfX import *
+
 import datetime
-from tp_telnet import ProfX, Screen
-from utils import process_whitespaced_table, extract_column_widths
+import config
+import datetime
+import logging
 import time
 
-import config
+from utils import process_whitespaced_table, extract_column_widths
 
-import logging
 setRipperLogger = logging.getLogger(__name__)
 
 """ Contains data about a Set of tests, containing their Authorisation Group and Autocomment Group. If set was unavailable (locked by other user), Success will be False. """
@@ -150,46 +152,46 @@ class NPCLList():
 def get_Set_definitions(Sets:list, reckless=False):
 
     def check_access():
-        if (ProfX.screenLength >= 24):
-            if (ProfX.Lines[23].strip() == "Set accessed by another user at present. Press ESC"):
+        if (TelePath.screenLength >= 24):
+            if (TelePath.Lines[23].strip() == "Set accessed by another user at present. Press ESC"):
                 setRipperLogger.warning(f"Cannot access Set {Set}, being used by another user. Dropping.")
                 #SetDefinitions.append(SetDefinition(SetCode=Set, AuthorisationGroup="", AutoCommentGroup="", AccessedSuccessfully=False))
-                ProfX.send_raw(b'\x1b', readEcho=False)
-                ProfX.read_data()
+                TelePath.send_raw(b'\x1b', readEcho=False)
+                TelePath.read_data()
                 return False
         return True
 
-    ProfX.return_to_main_menu()
-    ProfX.send(config.LOCALISATION.SETMAINTENANCE)
-    ProfX.read_data()
-    ProfX.send('A')
-    ProfX.read_data()
+    return_to_main_menu()
+    TelePath.send(config.LOCALISATION.SETMAINTENANCE)
+    TelePath.read_data()
+    TelePath.send('A')
+    TelePath.read_data()
     SetDefinitions = []
     for Set in Sets:
         AUCOM_Code = ""
         AuthGroup_Code = ""
-        ProfX.send(Set) #TODO: breaks here... works when debugging, stepping through SLOWLY
+        TelePath.send(Set)
         if not reckless: 
             time.sleep(1)   # Seems to take about 1 second to check for access and return error
         else: 
             time.sleep(0.1)
-        ProfX.read_data()
+        TelePath.read_data()
         if not check_access():            
                 continue
         
-        if (ProfX.screenLength >= 24):
-            if (ProfX.Lines[23].strip() == "WARNING: Exists as a superset, with priority at request entry - OK <N>"):
+        if (TelePath.screenLength >= 24):
+            if (TelePath.Lines[23].strip() == "WARNING: Exists as a superset, with priority at request entry - OK <N>"):
                 setRipperLogger.warning(f"Set {Set} is a 'superset', retrieving anyway...")
-                ProfX.send_raw('Y'.encode('ASCII')) #In this instance, the system instantly reacts to the keypress
+                TelePath.send_raw('Y'.encode('ASCII')) #In this instance, the system instantly reacts to the keypress
                 # sending it with the \r added by regular send() will then immediately skip to 'acceptable sample types'
                 time.sleep(0.1) # Seems if we read too fast we miss the correction.
                 if check_access(): #Still possible to get access denied here if another user is in here.
-                    ProfX.read_data()
+                    TelePath.read_data()
                 else:
                      continue
                 
-        AuthGroupLine = [x for x in ProfX.ParsedANSI if x.line == 19 and x.column == 68 and x.text.strip(".")] #[x for x in ProfX.Lines[14].split(" ") if x]
-        AUCOMLine = [x for x in ProfX.ParsedANSI if x.line == 14 and x.column == 33 and x.text.strip(".")] #[x for x in ProfX.Lines[19].split(" ") if x]
+        AuthGroupLine = [x for x in TelePath.ParsedANSI if x.line == 19 and x.column == 68 and x.text.strip(".")] #[x for x in TelePath.Lines[14].split(" ") if x]
+        AUCOMLine = [x for x in TelePath.ParsedANSI if x.line == 14 and x.column == 33 and x.text.strip(".")] #[x for x in TelePath.Lines[19].split(" ") if x]
 
         if AUCOMLine:
             AUCOM_Code = AUCOMLine[0].text
@@ -199,8 +201,8 @@ def get_Set_definitions(Sets:list, reckless=False):
         SetDefinitions.append(SetDefinition(SetCode=Set, AuthorisationGroup=AuthGroup_Code, AutoCommentGroup=AUCOM_Code, AccessedSuccessfully=True))
         
         setRipperLogger.info(f"get_Set_definitions(): Retrieved Set {Set}: AUCOM {AuthGroup_Code}, SNPCL {AUCOM_Code}")
-        ProfX.send(config.LOCALISATION.CANCEL_ACTION)
-        ProfX.read_data()
+        TelePath.send(config.LOCALISATION.CANCEL_ACTION)
+        TelePath.read_data()
     setRipperLogger.info(f"get_Set_definitions(): Loop complete. Returning {len(SetDefinitions)} identifiers.")
     return SetDefinitions
 
@@ -209,35 +211,35 @@ def get_Set_definitions(Sets:list, reckless=False):
     Only when any of these equate to TRUE is the result held for authorisation. """
 def get_NPCL_Interventions(NPCL_Lists:list):
     #FIX for 'XT'
-    ProfX.tn.set_debuglevel(0)
+    TelePath.tn.set_debuglevel(0)
     if not isinstance(NPCL_Lists, list):
         if isinstance(NPCL_Lists, NPCLList):
             NPCL_Lists = [NPCL_Lists]
     for NPCL_List in NPCL_Lists:
-        ProfX.return_to_main_menu()
+        return_to_main_menu()
         
-        ProfX.send(config.LOCALISATION.NPCLSETS)
-        ProfX.read_data()
+        TelePath.send(config.LOCALISATION.NPCLSETS)
+        TelePath.read_data()
         setRipperLogger.info(f"Retrieving auto-Authorization Interventions for NPCL list '{NPCL_List.AuthCode}'...")
-        ProfX.send(NPCL_List.AuthCode)
-        ProfX.read_data()
-        if (ProfX.screenLength <= 23): # The list exists
-            NPCL_List.Checks = [ x[5:] for x in ProfX.Lines[10:14] ]
-            ProfX.send('^L')   
-            ProfX.read_data()
-            if (ProfX.screenLength <= 23): #List exists AND has sets
-                if (ProfX.hasErrors):
+        TelePath.send(NPCL_List.AuthCode)
+        TelePath.read_data()
+        if (TelePath.screenLength <= 23): # The list exists
+            NPCL_List.Checks = [ x[5:] for x in TelePath.Lines[10:14] ]
+            TelePath.send('^L')   
+            TelePath.read_data()
+            if (TelePath.screenLength <= 23): #List exists AND has sets
+                if (TelePath.hasErrors):
                     setRipperLogger.warning(f"'{NPCL_List.AuthCode}': No codes are within the given specification")
                     continue
-                AuthSets =  [x for x in ProfX.Lines[4:-1] if x] #grab lines with sets
+                AuthSets =  [x for x in TelePath.Lines[4:-1] if x] #grab lines with sets
                 for line in AuthSets:
                     line = [x.strip() for x in line.split(" ") if x]
                     index = line[0].rstrip(")")
                     type  = line[-1]
-                    ProfX.send(index)
-                    ProfX.read_data()
+                    TelePath.send(index)
+                    TelePath.read_data()
                     #There does not seem to be an N option on this screen, ever; max is 28 items. No check / page turning code needed.
-                    CodeLines = [x for x in ProfX.Lines[5:-1] if x]
+                    CodeLines = [x for x in TelePath.Lines[5:-1] if x]
                     CodeTable = process_whitespaced_table(tableLines = CodeLines, headerWidths = [8, 14, 44, 47, 54, 86])
                     assert len(CodeTable) % 2 == 0
                     cleanTable = [x[0:3] for x in CodeTable]
@@ -246,13 +248,13 @@ def get_NPCL_Interventions(NPCL_Lists:list):
                     del CodeTable
                     cleanTable = [x[1:] for x in cleanTable if x[2]]
                     NPCL_List.StyleSets.append( NPCLAuthIntervention(NPCL_List.AuthCode, index, type, cleanTable) )
-                    ProfX.send('A') 
-                    ProfX.read_data() #Probably won't start with an ANSI code?
-                    ProfX.send('^L') # ESC is not echoed, but the L is?!
-                    ProfX.read_data()
+                    TelePath.send('A') 
+                    TelePath.read_data() #Probably won't start with an ANSI code?
+                    TelePath.send('^L') # ESC is not echoed, but the L is?!
+                    TelePath.read_data()
             else: #List does not have sets. Press ESC.
                 setRipperLogger.warning(f"'{NPCL_List.AuthCode}' does not appear to have any filters specified.")
-                ProfX.send_raw(b'\x1B')
+                TelePath.send_raw(b'\x1B')
                 #NPCL_List.StyleSets.append( NPCLAuthIntervention(NPCL_List.AuthCode, None, None, None, OptLines) )
         else:
             # Error "<CODE> - Not in code list for Authorisation list code. Press ESC"
@@ -266,7 +268,7 @@ def get_authorisation_group_structure(SNPCLLists:set):
     def process_SNPCL_screen():
         nonlocal Page_Has_Blanks
         nonlocal NPCL_Item_Tuples
-        _tmpTable = process_whitespaced_table(tableLines=ProfX.Lines[5:21], headerWidths=[7, 15, 44, 47, 55])
+        _tmpTable = process_whitespaced_table(tableLines=TelePath.Lines[5:21], headerWidths=[7, 15, 44, 47, 55])
         for row in _tmpTable:
             if row[1]:
                 NPCL_Item_Tuples.append((row[0].rstrip(")"), row[1], row[2]))
@@ -277,38 +279,38 @@ def get_authorisation_group_structure(SNPCLLists:set):
             else:
                 Page_Has_Blanks = True 
 
-    ProfX.return_to_main_menu()
-    ProfX.send(config.LOCALISATION.SNPCL)
-    ProfX.read_data()
+    return_to_main_menu()
+    TelePath.send(config.LOCALISATION.SNPCL)
+    TelePath.read_data()
     
     for SNPCLList in SNPCLLists:
         if not SNPCLList: # Some assays do not have pre-processing
             continue
         NPCL_Item_Tuples = []
         setRipperLogger.info(f"get_authorisation_group_structure(): Retrieving NPCL lists(s) for {SNPCLList}.")
-        ProfX.send(SNPCLList)
-        ProfX.read_data()
-        if (ProfX.screenLength == 24):  # Set does not exist and we entered creation mode
+        TelePath.send(SNPCLList)
+        TelePath.read_data()
+        if (TelePath.screenLength == 24):  # Set does not exist and we entered creation mode
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} is being accessed. Must be retried later.")
-            ProfX.send_raw(b'\x1B')
-            ProfX.read_data()
-            ProfX.return_to_main_menu()    # There's no graceful return option - B makes a set called B, ^ and '' both yeet one to the main menu.
-            ProfX.send('SNPCL')            # So we just need to return...
-            ProfX.read_data()
+            TelePath.send_raw(b'\x1B')
+            TelePath.read_data()
+            return_to_main_menu()    # There's no graceful return option - B makes a set called B, ^ and '' both yeet one to the main menu.
+            TelePath.send('SNPCL')            # So we just need to return...
+            TelePath.read_data()
             continue
 
-        if (ProfX.Lines[4].strip() != "Auth code"):  # Set does not exist and we entered creation mode
+        if (TelePath.Lines[4].strip() != "Auth code"):  # Set does not exist and we entered creation mode
             setRipperLogger.warning(f"Authorisation Group {SNPCLList} does not appear to exist. This shouldn't happen if fed from set_ripper().")
-            ProfX.send(config.LOCALISATION.CANCEL_ACTION)        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
-            ProfX.read_data()
-            ProfX.send(config.LOCALISATION.SNPCL)
-            ProfX.read_data()
+            TelePath.send(config.LOCALISATION.CANCEL_ACTION)        # There's no graceful return option - B makes a set called B, ^ and '' both yeet one back to the main menu.
+            TelePath.read_data()
+            TelePath.send(config.LOCALISATION.SNPCL)
+            TelePath.read_data()
             continue
 
         process_SNPCL_screen() # Parses the whitespaced 'table' pf options, checks if we see any blanks, adds options to tuple thing.
         while Page_Has_Blanks == False:
-            ProfX.send('N')
-            ProfX.read_data()
+            TelePath.send('N')
+            TelePath.read_data()
             process_SNPCL_screen()
         #while Page_Has_Blanks == False
 
@@ -316,53 +318,53 @@ def get_authorisation_group_structure(SNPCLLists:set):
             StarFreeAuthCode = NPCLListIndex[1].lstrip("*") #The * is prepended by TelePath if there is no log
             tmp = NPCLList(AuthGroup=SNPCLList, AuthCode=StarFreeAuthCode) 
             if (NPCLListIndex[1]==StarFreeAuthCode):
-                ProfX.send('U')  # The only reason to call U without the index is that indices _could_ be over 99.
-                ProfX.read_data()
-                ProfX.send(NPCLListIndex[0])#, readEcho=False) # Indices here are not per page but unique, and can be called from any page.
-                ProfX.read_data()
-                tmp.LogicTree = [x for x in ProfX.Lines[2:22] if x]
-                ProfX.send('A')
-                ProfX.read_data()
+                TelePath.send('U')  # The only reason to call U without the index is that indices _could_ be over 99.
+                TelePath.read_data()
+                TelePath.send(NPCLListIndex[0])#, readEcho=False) # Indices here are not per page but unique, and can be called from any page.
+                TelePath.read_data()
+                tmp.LogicTree = [x for x in TelePath.Lines[2:22] if x]
+                TelePath.send('A')
+                TelePath.read_data()
             else:
                 tmp.LogicTree = ["No sift specified."]
             NPCLObjs.append( tmp )
-        ProfX.send('B')    # Unlisted options, can still go (B)ack to overview
-        ProfX.read_data()
+        TelePath.send('B')    # Unlisted options, can still go (B)ack to overview
+        TelePath.read_data()
     # For SNPCLList in SNPCLLists
     return NPCLObjs
 
 """ Retrieves autocomment structure - the logic that is used for testing, and the resulting comments to be applied """
 def get_autocomment_structure(AUCOMSets:set):
     AUCOM_Data = []
-    ProfX.return_to_main_menu()
-    ProfX.send(config.LOCALISATION.AUTOCOMMENTS)
-    ProfX.read_data()                  
+    return_to_main_menu()
+    TelePath.send(config.LOCALISATION.AUTOCOMMENTS)
+    TelePath.read_data()                  
     for AUCOM_Routine in AUCOMSets:
         if not AUCOM_Routine:
             setRipperLogger.info(f"get_autocomment_structure(): Skipping malformed/empty autocomment routine '{AUCOM_Routine}'")
             continue
         setRipperLogger.info(f"get_autocomment_structure(): Retrieving Autocomment routines for {AUCOM_Routine}")
         Autocomment_Obj = AutoCommentStructure(AUCOM_Routine)
-        ProfX.send(AUCOM_Routine)
-        ProfX.read_data()
-        if (ProfX.screenLength >= 24):
-            if (ProfX.Lines[-1] == " Unable to allocate spec. Press ESC"):  # If the set is being accessed and thus locked.
-                ProfX.send_raw(b'\x1B')
+        TelePath.send(AUCOM_Routine)
+        TelePath.read_data()
+        if (TelePath.screenLength >= 24):
+            if (TelePath.Lines[-1] == " Unable to allocate spec. Press ESC"):  # If the set is being accessed and thus locked.
+                TelePath.send_raw(b'\x1B')
                 continue
         else:
-            AUCOM_Chunks = [x for x in ProfX.ParsedANSI if x.line == 3 and x.deleteMode == 0]
+            AUCOM_Chunks = [x for x in TelePath.ParsedANSI if x.line == 3 and x.deleteMode == 0]
             if AUCOM_Chunks:
                 AUCOM_Chunks = AUCOM_Chunks[1:] # First line is a header which we would like to ignore
                 try:
                     assert len(AUCOM_Chunks) % 2 == 0
                     for ChunkIndex in range(0, len(AUCOM_Chunks))[::2]:
                         Index = AUCOM_Chunks[ChunkIndex].text.strip().rstrip(")")
-                        ProfX.send('E')    # Enter (E)dit mode (no other way to see contents)
-                        ProfX.read_data()
-                        ProfX.send(Index)
+                        TelePath.send('E')    # Enter (E)dit mode (no other way to see contents)
+                        TelePath.read_data()
+                        TelePath.send(Index)
                         #time.sleep(0.2)         # Safety measure, gives the server time to collate its data
-                        ProfX.read_data()
-                        CommStr = [x for x in ProfX.Lines[3:-1] if x]
+                        TelePath.read_data()
+                        CommStr = [x for x in TelePath.Lines[3:-1] if x]
                         FinalComms=[]
                         for line in CommStr:
                             line = line.split("\r\n")
@@ -370,26 +372,26 @@ def get_autocomment_structure(AUCOMSets:set):
                             for comm in line:
                                 if comm:
                                     FinalComms.append(comm)
-                        ProfX.send('A')    # (A)ccept, switches to logic view
-                        ProfX.read_data()
-                        CommLogic = [x for x in ProfX.Lines[3:-1] if x]
+                        TelePath.send('A')    # (A)ccept, switches to logic view
+                        TelePath.read_data()
+                        CommLogic = [x for x in TelePath.Lines[3:-1] if x]
                         tmpACP = AutoCommentSet(FinalComms, CommLogic)
                         Autocomment_Obj.Pages.append(tmpACP)    # Creates data structure and appends to AutoCommentStructure container
-                        ProfX.send('A')    # (A)ccept, goes back to root for next index
-                        ProfX.read_data()
+                        TelePath.send('A')    # (A)ccept, goes back to root for next index
+                        TelePath.read_data()
                 except AssertionError:
                     setRipperLogger.debug(f"get_autocomment_structure(): '{AUCOM_Routine}' returns uneven number of AUCOM_Chunks. Adding 'None' and continuing.")
             else: 
                 setRipperLogger.debug(f"get_autocomment_structure(): '{AUCOM_Routine}' returns no AUCOM_Chunks.")
-            ProfX.send('A')    # (A)ccept, returns to root screen
-            ProfX.read_data()
+            TelePath.send('A')    # (A)ccept, returns to root screen
+            TelePath.read_data()
             try:
-                FullLines = [x for x in ProfX.Lines if x]
+                FullLines = [x for x in TelePath.Lines if x]
                 assert len(FullLines) < 5 # If we successfully returned to the main screen, there is only System Header, Screen Type, Routine / Title line. Not even options.
             except AssertionError:
                 setRipperLogger.debug(f"get_autocomment_structure(): Unclear whether return to base screen was successful:")
-                setRipperLogger.debug(ProfX.Text)
-        #if ProfX.screenLength < 24
+                setRipperLogger.debug(TelePath.Text)
+        #if TelePath.screenLength < 24
         AUCOM_Data.append( Autocomment_Obj )
     #for AUCOM_Routine
     return AUCOM_Data
@@ -439,14 +441,14 @@ def set_ripper(SetsToRip, reckless=True):
 SetsIO = open("./SetsToExtract.txt", "r")
 SetsToRip = SetsIO.readlines()
 SetsIO.close()
-SetsToRip = [x.strip() for x in SetsToRip]
+SetsToRip = [x.strip() for x in SetsToRip][1:5]
 
 try:
-    ProfX.connect()#TrainingSystem=True)
+    connect()
     set_ripper(SetsToRip, reckless=True)
 
 except Exception as e: 
     setRipperLogger.error(e)
 
 finally:
-    ProfX.disconnect()
+    disconnect()
