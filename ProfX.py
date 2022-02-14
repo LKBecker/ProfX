@@ -36,7 +36,6 @@ class tp_SpecimenID(datastructs.SampleID):
         self.Year       = None
         self.LabNumber  = None
         self.CheckChar  = None
-        self.AsText     = ""
         self.useLocalisationValidationFun = useLocalisationValidationFun
         IDStr = IDStr.upper()
         if IDStr[1]==",":
@@ -100,12 +99,13 @@ class tp_SpecimenID(datastructs.SampleID):
                 raise ValueError("No ID Number assigned after parsing, sample cannot be identified.")
 
             #logging.debug(f"SampleID(): ID '{str(self)}' assembled. ID is: {['Not Valid', 'Valid'][self.validate()]}")
-            self.AsText = str(self)
 
         except (AssertionError, ValueError):
             logging.debug(f"SampleID(): ID parsing failed for {IDStr}.")
 
     def __str__(self) -> str:
+        if self.Override:
+            return self._str
         return f"{self.Year}.{self.LabNumber:07}.{self.CheckChar}" #Without padding of ID Number to 10 positions, the validation will not work correctly
 
     def __repr__(self) -> str:
@@ -117,8 +117,8 @@ class tp_SpecimenID(datastructs.SampleID):
         assert self.LabNumber
         assert self.CheckChar
 
-        if self.useLocalisationValidationFun: #TODO: test
-            return config.LOCALISATION.check_sample_id(self.AsText)
+        if self.useLocalisationValidationFun:
+            return config.LOCALISATION.check_sample_id(str(self))
 
         sID = str(self).replace(".", "")
         if (len(sID)!=10):
@@ -173,9 +173,6 @@ class tp_Specimen(datastructs.Specimen):
                 logging.warning(f"WARNING: Mismatch between assigned specimen ID {self._ID} and retrieved ID {specID}!")
         
         self.PatientID          = TelePath.chunk_or_none(DataChunks, line = 8, column = 1)
-        #TODO: put into PATIENT object (Search for existing patient, if not make new for Registration)
-        #TODO: get patient ID (registration)
-
         self.LName              = TelePath.chunk_or_none(DataChunks, line = 8, column = 21)
         self.FName              = TelePath.chunk_or_none(DataChunks, line = 8, column = 35)
         self.DOB                = TelePath.chunk_or_none(DataChunks, line = 8, column = 63)
@@ -231,7 +228,7 @@ class tp_Specimen(datastructs.Specimen):
                     self.Sets[_tmp[0]].Index  = index
                     self.Sets[_tmp[0]].Status = status
                     continue
-            self.Sets.append(datastructs.TestSet(Sample=self.ID, SetIndex=index, SetCode=test, Status=status))
+            self.Sets.append(tp_TestSet(Sample=self.ID, SetIndex=index, SetCode=test, Status=status))
         
         #TelePath only highlights the specimen notepad option if entries exist; else it's part of a single chunk of options, none highlighted. So...
         if [x for x in ANSIChunks if (x.text=="spc N'pad" and x.highlighted)]: 
@@ -331,6 +328,37 @@ class tp_Patient(datastructs.Patient):
         logging.info("tp_Specimen(s) found.")
 
 
+class tp_TestSet(datastructs.TestSet):
+    def __init__(self, Sample:str, SetIndex:str, SetCode:str, AuthedOn:str=None, AuthedBy:str=None, Status:str=None, 
+                 Results:list=None, Comments:list=None, RequestedOn:str=None, TimeOverdue:str=None, Override:bool=False):
+        super().__init__(Sample, SetIndex, SetCode, AuthedOn, Status, Results, Comments, RequestedOn, TimeOverdue, Override)
+        self.History = []
+
+    def __repr__(self): 
+        return f"tp_TestSet(ID={str(self.Sample)}, SetIndex={self.Index}, SetCode={self.Code}, AuthedOn={self.AuthedOn}, AuthedBy={self.AuthedBy}, Status={self.Status}, ...)"
+    
+    def __str__(self): 
+        return f"[{self.Sample}, #{self.Index}: {self.Code} ({self.Status})] - {len(self.Results)} SetResults, {len(self.Comments)} Comments. Authorized {self.AuthedOn} by {self.AuthedBy}."
+ 
+
+class tp_HistoryEntry():
+    def __init__(self, Sample, TestSet, DateTime="", Event="", User=""):
+        self.SampleID = Sample
+        self.TestSet = TestSet
+        self.DateTime = DateTime
+        self.Event = Event
+        self.User = User
+
+    def fromChunks(self):
+        pass
+
+    def __repr__(self): 
+        return f"tp_HistoryEntry(Sample={str(self.SampleID)}, TestSet={self.TestSet}, DateTime={self.DateTime}, Event={self.Event}, User={self.User})"
+    
+    def __str__(self): 
+        return f"Sample {str(self.SampleID)}, Set {self.TestSet}, {self.DateTime}: {self.Event} {self.User}"
+
+    
 tp_Patient.Storage = datastructs.SingleTypeStorageContainer(tp_Patient)
 
 """ Locates samples with AOT beyond TAT (...i.e. any), and marks the AOT as 'NA' if insert_NA_result is set to True """
@@ -628,7 +656,8 @@ def CLI():
     Option GetFurther also retrieves Clinical Details and NHS Number.
     Can also retreive Sets run, Set result(s), Set comments, and tp_Specimen Notepad data.
     If FillSets is true, loads all available data, else, only attempts to complete TestSet obj present in the tp_Specimen"""
-def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetComments:bool=False, GetFurther:bool=False, ValidateSamples:bool=True, FillSets:bool=False, FilterSets:list=None):
+def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetComments:bool=False, GetFurther:bool=False, 
+                                    ValidateSamples:bool=True, FillSets:bool=False, FilterSets:list=None, GetHistory:bool=False):
     if type(SampleObjs)==tp_Specimen:
         SampleObjs = [SampleObjs]
 
@@ -662,8 +691,8 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         SetAuthTime = "[Not Authorized]"
         SetRepTime = "[Not Reported]"
 
-        SetIsAuthed = False
-        if SetToGet.Status:
+        SetIsAuthed = True #TODO Set to True for some testing, should technically start False (but works due to defensive code below)
+        if SetToGet.Status: #TODO: All Statuses are None - where are they retrieved?
             if SetToGet.Status[0]=="R":
                 SetIsAuthed = True
 
@@ -671,7 +700,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
             if AuthData:
                 if not AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
-                    SetIsAuthed = True
+                    SetIsAuthed = False
         
         if SetIsAuthed:
             SetAuthData = [x for x in TelePath.ParsedANSI if x.line == 4 and x.highlighted == True]
@@ -693,6 +722,104 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         
         SetToGet.AuthedOn = SetAuthTime
         SetToGet.AuthedBy = SetAuthUser
+
+    def get_history(Set:tp_TestSet):
+        TP_HISTORY_TIMESTAMP = "%d-%b-%y %H:%M"
+        TP_HISTORY_TS_LEN = len(TP_HISTORY_TIMESTAMP)
+        multiLineEvents = ["Free text entered/edited by:", "Results entered/edited by:"]
+
+        def extract_history_page():
+            historyLines = TelePath.Lines[6].split("\r\n")
+            historyLines =  historyLines[1:]
+            historyLines = [ x for x in historyLines if x ]
+
+            index = 0
+            while index < len(historyLines):
+                line = historyLines[index]
+                dateTime = line[:TP_HISTORY_TS_LEN+1]
+                colIndex = line.find(":", TP_HISTORY_TS_LEN, len(line))
+                if colIndex != -1:
+                    dateTime = datetime.datetime.strptime(dateTime, TP_HISTORY_TIMESTAMP)
+                    event = line[TP_HISTORY_TS_LEN+1:colIndex+1].strip()
+                    user  = line[colIndex+1:].strip()
+
+                    if event in multiLineEvents:
+                        moreLines = 0
+                        dateTimeMatch = False
+
+                        while (dateTimeMatch == False) and (index+moreLines < len(historyLines)):
+                            moreLines = moreLines + 1
+                            try:
+                                datetime.datetime.strptime(historyLines[index+moreLines][:len(TP_HISTORY_TIMESTAMP)+1], TP_HISTORY_TIMESTAMP)
+                                dateTimeMatch = True
+                            except:
+                                continue
+                            
+                        event = event + ";".join(historyLines[index+1:index+moreLines])
+                        index = index + moreLines 
+
+                    Set.History.append( tp_HistoryEntry(Set.Sample, Set.Code, dateTime, event, user) )
+                
+                else:
+                    logging.debug(f"Warning: Could not parse history event [{line}].")
+                
+                index = index + 1 
+
+        assert(TelePath.ScreenType == "SENQ")
+        TelePath.send('H' + str(Set.Index))
+        TelePath.read_data()
+        extract_history_page()
+        
+        last_line = TelePath.Lines[6]
+        while TelePath.DefaultOption != 'Q':
+            TelePath.send('+')
+            TelePath.read_data()
+            extract_history_page()
+            if TelePath.Lines[6] == last_line: #Default option does not change to Q if there's exactly enough entries to fill a page.
+                break
+            last_line = TelePath.Lines[6]
+        
+        TelePath.send(config.LOCALISATION.CANCEL_ACTION)
+        TelePath.read_data()
+        assert(TelePath.ScreenType == "SENQ")
+
+    def get_notepad_entries(Sample:tp_Specimen):
+        assert(TelePath.ScreenType == "SENQ")
+        if(Sample.hasNotepadEntries == True):
+            TelePath.send('N', quiet=True)  #Open tp_Specimen Notepad for this Sample
+            TelePath.read_data()
+            if (TelePath.hasErrors == True):
+                logging.warning("complete_specimen_data_in_obj(): Received error message when accessing specimen notepad for sample %s: %s" % (Sample, ";".join(TelePath.Errors)))
+                TelePath.send("", quiet=True)
+                tp_SpecimenNotepadEntries = [datastructs.SpecimenNotepadEntry(ID=Sample.ID, Author="[python]", Text="[Access blocked by other users, please retry later]", Index="0", Authored="00:00 1.1.70")]
+            
+            else:
+                tp_SpecimenNotepadEntries = [x for x in TelePath.ParsedANSI if x.line >= 8 and x.line <= 21 and x.deleteMode == 0]
+                SNObjects = []
+                for entryLine in tp_SpecimenNotepadEntries:
+                    _entryData = entryLine.text.split(" ")
+                    _entryData = [x for x in _entryData if x != ""]
+                    if len(_entryData) > 5:
+                        #TODO: this never yet happened, ensure it works
+                        logging.debug("There are likely two specimen notepad entries in line '%s'" % entryLine)
+                        SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[7], _entryData[6], "", _entryData[5].strip(")"), _entryData[8]+" "+_entryData[9])) #THEORETICAL - not tested yet
+                    SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[2], _entryData[1], "", _entryData[0].strip(")"), _entryData[3]+" "+_entryData[4]))
+                
+                for SNEntry in SNObjects:
+                    TelePath.send(SNEntry.Index, quiet=True)  # Open the entry 
+                    TelePath.read_data()           # Receive data
+                    #TODO: What if more than one page of text?
+                    SNText = list(map(lambda x: x.text, TelePath.ParsedANSI[2:-2]))
+                    SNEntry.Text = ";".join(SNText)# Copy down the text and put it into the instance
+                    TelePath.send("B", quiet=True)            # Go BACK, not default option QUIT 
+                    time.sleep(0.1)
+                    TelePath.read_data()           # Receive data
+                
+                Sample.NotepadEntries = SNObjects
+                TelePath.send("Q", quiet=True)                # QUIT specimen notepad
+                TelePath.read_data()               # Receive data
+                assert(TelePath.ScreenType == "SENQ")
+
 
     if len(SampleObjs)==0: 
         logging.warning("Could not find any Samples to process. Exiting program.")
@@ -725,36 +852,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                 Sample.Sets = [x for x in Sample.Sets if x.Code in _SetCodes]
 
             if (GetNotepad == True):
-                if(Sample.hasNotepadEntries == True):
-                    TelePath.send('N', quiet=True)  #Open tp_Specimen Notepad for this Sample
-                    TelePath.read_data()
-                    if (TelePath.hasErrors == True):
-                        logging.warning("complete_specimen_data_in_obj(): Received error message when accessing specimen notepad for sample %s: %s" % (Sample, ";".join(TelePath.Errors)))
-                        TelePath.send("", quiet=True)
-                        tp_SpecimenNotepadEntries = [datastructs.SpecimenNotepadEntry(ID=Sample.ID, Author="[python]", Text="[Access blocked by other users, please retry later]", Index="0", Authored="00:00 1.1.70")]
-                    else:
-                        tp_SpecimenNotepadEntries = [x for x in TelePath.ParsedANSI if x.line >= 8 and x.line <= 21 and x.deleteMode == 0]
-                        SNObjects = []
-                        for entryLine in tp_SpecimenNotepadEntries:
-                            _entryData = entryLine.text.split(" ")
-                            _entryData = [x for x in _entryData if x != ""]
-                            if len(_entryData) > 5:
-                                #TODO: this never yet happened, ensure it works
-                                logging.debug("There are likely two specimen notepad entries in line '%s'" % entryLine)
-                                SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[7], _entryData[6], "", _entryData[5].strip(")"), _entryData[8]+" "+_entryData[9])) #THEORETICAL - not tested yet
-                            SNObjects.append(datastructs.SpecimenNotepadEntry(_entryData[2], _entryData[1], "", _entryData[0].strip(")"), _entryData[3]+" "+_entryData[4]))
-                        for SNEntry in SNObjects:
-                            TelePath.send(SNEntry.Index, quiet=True)  # Open the entry 
-                            TelePath.read_data()           # Receive data
-                            #TODO: What if more than one page of text?
-                            SNText = list(map(lambda x: x.text, TelePath.ParsedANSI[2:-2]))
-                            SNEntry.Text = ";".join(SNText)# Copy down the text and put it into the instance
-                            TelePath.send("B", quiet=True)            # Go BACK, not default option QUIT 
-                            time.sleep(0.1)
-                            TelePath.read_data()           # Receive data
-                        Sample.NotepadEntries = SNObjects
-                        TelePath.send("Q", quiet=True)                # QUIT specimen notepad
-                        TelePath.read_data()               # Receive data
+                get_notepad_entries(Sample)
             
             if (GetFurther == True):
                 #Retrieve NHS Number and Clinical Details, which are not visible on main screen...
@@ -782,6 +880,10 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                     if SetToGet.Index == -1:
                         logging.error("complete_specimen_data_in_obj(): Sample %s has no Set '%s'. Skipping..." % (Sample, SetToGet))
                         continue
+
+                    if GetHistory == True:
+                        get_history(SetToGet)
+
                     TelePath.send(str(SetToGet.Index), quiet=True)
                     TelePath.read_data()
 
@@ -905,7 +1007,7 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
         if (TelePath.screenLength > 5):        # #Presence of non-empty lines after four lines of header implies there are list members to parse
             samples     = utils.process_whitespaced_table(TelePath.Lines[5:-2], utils.extract_column_widths(TelePath.Lines[3]))
             for sample in samples: 
-                _Set = datastructs.TestSet(Sample=sample[3], SetIndex=None, SetCode=sample[5], TimeOverdue=sample[6], RequestedOn=sample[4])
+                _Set = tp_TestSet(Sample=sample[3], SetIndex=None, SetCode=sample[5], TimeOverdue=sample[6], RequestedOn=sample[4])
                 if FilterSets:
                     if _Set.Code in FilterSets:
                         continue
@@ -1045,10 +1147,6 @@ def get_recent_sister_result(Samples, SetFilter, Analyte):
             IO.write('\t'.join(str(item)))
             IO.write('\n')
     utils.generatePrettyTable(recentSisterSamples, Headers=sisterSampleHeaders, printTable=True)
-
-def get_specimen_history(Samples:list):
-
-    pass
 
 def lab_status_report():
     logging.info(" ### LAB STATUS REPORT ###")
@@ -1267,8 +1365,8 @@ if __name__ == "__main__":
         #==========
         #mass_download(get_recent_samples_of_set_type("FK506", nMaxSamples=210), FilterSets=["FK506"], getNotepad=False) #FilterSets means only the specified sets are retrieved
         #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
-        #ReninALDOSamples = ["22.0070714.L"]
-        #mass_download(ReninALDOSamples, FilterSets=["ALDO1", "E2"])
+        
+        #mass_download(OestradiolSamples, FilterSets=["OEMS"])
         #get_recent_sister_result(ReninALDOSamples, "E2", "K")
         
         #get_recent_history("22.0119928.T", nMaxSamples=24) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
@@ -1281,10 +1379,10 @@ if __name__ == "__main__":
         #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
         #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
         #sendaways_scan() # Shows how many overdue sendaways there are
-        sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
+        #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
         #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
         #NPEX_Buster(Set="FCAL")
-        auth_queue_size(DetailLevel=1)
+        #auth_queue_size(DetailLevel=1)
         #lab_status_report()
         #visualise("A,22.0093756.G", nMaxSamples=10) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
         pass

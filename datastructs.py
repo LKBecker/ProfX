@@ -184,17 +184,18 @@ class SampleID():
     def __init__(self, IDStr, Override = False):
         self.Override = Override
         if self.Override:
-            self.AsText = IDStr
+            self._str = IDStr
             return
         self.LabNumber = ""
         self.Year = ""
         self.CheckChar = ""
+        self._str = f"{self.Year}.{self.LabNumber}.{self.CheckChar}"
 
     def __str__(self) -> str:
-        return self.AsText
+        return self._str
 
     def __repr__(self) -> str:
-        return f"SampleID(\"{self.AsText}\", Override=True)"
+        return f"SampleID(\"{self._str}\", Override={self.Override})"
 
     def __gt__(self, other) -> bool:
         if not isinstance(other, SampleID):
@@ -308,14 +309,18 @@ class Specimen():
                 return None
     
        
-    #TODO - are these still needed?
+    """ Gets the set's index in the LIMP (NOT the index in sample.Sets!) """
     def get_set_index(self, code):
         if code not in self.SetCodes: return -1
         if len(self.Sets) == 0: raise IndexError("No tests are registered with this Specimen")
-        #results = list(map(lambda y: y[0], filter(lambda x: x[1]==code, self.Tests)))
         Indices = [x.Index for x in self.Sets if x.Code==code]
         if len(Indices)==1 : return Indices[0]
         return Indices
+
+    def get_set(self, code):
+        if code not in self.SetCodes: return -1
+        if len(self.Sets) == 0: raise IndexError("No tests are registered with this Specimen")
+        return [x for x in self.Sets if x.Code==code][0]
     
     def get_set_status(self, code):
         if code not in self.SetCodes: return -1
@@ -329,7 +334,6 @@ class Specimen():
 """Contains data pertaining to a patient. PII-heavy, DO NOT EXPORT"""
 class Patient():
     def __init__(self, ID):
-        #TODO: Add to PatientContainer, check for duplicate/pre-existing. Merge PID?
         self.ID = ID
         self.Samples = []
         self.FName = None
