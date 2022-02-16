@@ -6,7 +6,10 @@ import math
 
 """Extracts the column widths from a variable-whitespace separated table, from a line of headers.
 Headers are assumed *not* to have single spaces in their column names!"""
-def extract_column_widths(headerStr:str) -> list: return [x+1 for x in range(0, len(headerStr)) if headerStr[x] == ' ' and headerStr[x+1] != ' ']
+def extract_column_widths(headerStr:str, mustStartWithCapital:bool=True) -> list: 
+    if not mustStartWithCapital:
+        return [x+1 for x in range(0, len(headerStr)) if headerStr[x] == ' ' and headerStr[x+1] != ' ']
+    return [x+1 for x in range(0, len(headerStr)) if headerStr[x] == ' ' and headerStr[x+1] != ' ' and (ord(headerStr[x+1]) > 64 and ord(headerStr[x+1]) < 91) ]
 
 """ Uses headerWidths derived from extract_column_widths() to parse a list of strings into a list of lists of strings (a table)"""
 def process_whitespaced_table(tableLines: list, headerWidths: list) -> list:

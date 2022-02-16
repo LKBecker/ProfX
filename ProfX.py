@@ -1300,7 +1300,7 @@ def get_recent_worksheets(Assay:str, nSheets:int=3, startDate:datetime.date=None
         if TelePath.hasErrors:
             err = parse_TP_error()
             if err['msg'] == f"No runs started on {_tmpDate}":
-                #logging.info(f"get_recent_worksheets(): There were no runs on {_tmpDate}.")
+                logging.info(f"get_recent_worksheets(): There were no {Assay} runs started on {_tmpDate}.")
                 nAttempts = nAttempts + 1
                 continue #Back to main while loop
         
@@ -1317,9 +1317,11 @@ def get_recent_worksheets(Assay:str, nSheets:int=3, startDate:datetime.date=None
                     else:
                         raise Exception(f"get_recent_worksheets(): Unexpected error: [{err['msg']}]")
 
-
+                logging.info(f"get_recent_worksheets(): Located Run [{nRuns}] from {_tmpDate}.")
                 TelePath.send("", readEcho=False) #Minimum cups (auto-assigned)
+                TelePath.read_data()
                 TelePath.send("", readEcho=False) #Maximum cups (auto-assigned)
+                TelePath.read_data()
                 TelePath.send("-") #output to AUX data ('printer')
                 time.sleep(0.1)
                 TelePath.read_data()
@@ -1328,9 +1330,11 @@ def get_recent_worksheets(Assay:str, nSheets:int=3, startDate:datetime.date=None
                 #Prep for next iteration:
                 nRuns = nRuns + 1
                 TelePath.send(Assay) #Tool resets after a run has been printed
+                TelePath.read_data()
                 TelePath.send(_tmpDate)
+                TelePath.read_data()
                                 
-            TelePath.send("^", readEcho=False) #Once you hit Unknown run number, quit interface, which resets back to first line (assay)
+            TelePath.send("^") #Once you hit Unknown run number, quit interface, which resets back to first line (assay)
             TelePath.read_data()
         
         nAttempts = nAttempts + 1 # A date has been tried, and the loop continues  
@@ -1511,18 +1515,18 @@ if __name__ == "__main__":
         #get_rack_location(OestradiolSamples, writeToFile=False)
         #get_overdue_sets()
         #get_outstanding_samples_for_Set("AOT", "AUTO")
-        get_recent_worksheets("OEMS")
+        #get_recent_worksheets("OEMS")
 
         #==========
         #Auto-processing functions: Sendaways, AOT stubs, NPEX stragglers.
         #==========
         #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
         #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
-        #sendaways_scan() # Shows how many overdue sendaways there are
+        sendaways_scan() # Shows how many overdue sendaways there are
         #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
         #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
         #NPEX_Buster(Set="FCAL")
-        #auth_queue_size(DetailLevel=1)
+        auth_queue_size(DetailLevel=1)
         #lab_status_report()
         #visualise("A,22.0093756.G", nMaxSamples=10) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
         pass

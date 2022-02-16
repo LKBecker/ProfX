@@ -327,9 +327,12 @@ class Connection():
         workingText         = workingText.decode("ASCII").lstrip()
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
-        if (firstANSICodePos > 0): 
-            telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code. Did you miss a read_data()?")
-            telnetLogger.debug(f"Raw text is '{workingText}'")
+        if (firstANSICodePos > 0):
+            if workingText[:len("P$tmessage")]=="P$tmessage":
+                pass
+            else:
+                telnetLogger.warning("parse(): Raw text does not begin with an ANSI control code. Did you miss a read_data()?")
+                telnetLogger.debug(f"Raw text does not begin with ANSI code:'{workingText[:100]}'")
             workingText = workingText[firstANSICodePos:]
 
         RawANSI = Connection.EscapeSplitter.split(workingText)       #split remaining text into <^[byte;byte;bytecmdText>tokens
@@ -366,7 +369,7 @@ class Connection():
                 _ParsedANSI.append(_delRawANSIChunk)
             
             elif RawANSIChunk.cmdByte == 'tmessage': 
-                telnetLogger.warning("Received PowerTerm tmessage, args '%s'" % RawANSIChunk.txt)
+                telnetLogger.debug("Received PowerTerm tmessage, args '%s'" % RawANSIChunk.txt)
                 _tRawANSIChunk = ParsedANSICommand(0, 0, RawANSIChunk.txt, False, 0, 0, True) #RawANSIChunk.txt contains the parameters of the tmessage function call
                 _ParsedANSI.append(_tRawANSIChunk)
                 continue
