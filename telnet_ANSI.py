@@ -86,7 +86,7 @@ class RawANSICommand():
     nF_EscSequence =  re.compile(r'\x1b\((?P<Prm_Bytes>[\x20-\x2F]*)(?P<Imd_Bytes>[\x20-\x2F]*)(?P<FinalByte>[\x30-\x7E])') 
     #See https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_(Control_Sequence_Introducer)_sequences
     #See https://vt100.net/emu/ctrlseq_dec.html
-    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>["\w ]+)')
+    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>["\w\.!?\- ]+)')
 
     ORD_FINAL_PRIVSEQ_MIN = ord("p")
     ORD_FINAL_PRIVSEQ_MAX = ord("~")
@@ -188,6 +188,7 @@ class Connection():
         self.OptionStr      = ""
         self.DefaultOption  = "^"           # This includes a default option
         self.Errors         = []
+        self.AUXData        = []
         self.hasErrors      = False
         self.CursorRow      = 0
         self.CursorCol      = 0
@@ -313,10 +314,12 @@ class Connection():
             self.send(PW, quiet=True, readEcho=False)
             self.tn.set_debuglevel(Connection.DEBUGLEVEL)
 
-    def recognise_Screen_type(self):
-        raise Exception("This base method should have been overridded using an appropriate, LIMS-specific method!")
+    def recognise_Screen_type(self) -> None:
+        raise Exception("This base method should have been overridded using an appropriate, LIMS-specific method, in your config.py!")
 
     def parse_raw_ANSI(self, workingText):
+        self.AUXData = []
+        self.rawANSICmds = []
         _ParsedANSI       = []
         if workingText == b'\x05':
             self.tn.write(self.Answerback)
@@ -331,7 +334,7 @@ class Connection():
 
         RawANSI = Connection.EscapeSplitter.split(workingText)       #split remaining text into <^[byte;byte;bytecmdText>tokens
         RawANSI = [x for x in RawANSI if x]
-        RawANSIComms = [RawANSICommand.from_text(x) for x in RawANSI]
+        self.rawANSICmds = [RawANSICommand.from_text(x) for x in RawANSI]
         
         #Local variables to cache ANSI code instructions for text, and transcribe them into ParsedANSICommands:
         currentLine   = 1
@@ -339,22 +342,15 @@ class Connection():
         #currentColor  = "bold;bg blue;fg green" #APEX default
         highlighted   = False
         
-        for RawANSIChunk in RawANSIComms:
+        for RawANSIChunk in self.rawANSICmds:
             #print ("processing %s (%s)" % (RawANSIChunk, RawANSIChunk.cmdByte))
             if RawANSIChunk.cmdByte == 'H':                #Set Cursor Position
                 currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting
-                #currentColumn   = RawANSIChunk.b2 - 1      # Same as above but for columns, though some SCP columns do start at 0!
                 currentColumn   = RawANSIChunk.b2      # Same as above but for columns, though some SCP columns do start at 0!
                                 
             elif RawANSIChunk.cmdByte == 'm':              #Select Graphic Rendition
-                #if RawANSIChunk.b1 == 1:   currentColor  = "bold;"
-                #else:               currentColor  = "undefined;"
-                #if RawANSIChunk.b2 == 44:  currentColor += "bg blue;"
-                #else:               currentColor += "undefined;"
-                #if RawANSIChunk.b3 == 32:  currentColor += "fg green;"
-                #if RawANSIChunk.b3 == 37:  currentColor += "fg white;"
-                if RawANSIChunk.b3 == 32:  highlighted = False #Let's keep it simple for now, APEX style only.
-                elif RawANSIChunk.b3 == 37:  highlighted = True
+                if RawANSIChunk.b3 == 32:   highlighted = False #Let's keep it simple for now, APEX style only.
+                elif RawANSIChunk.b3 == 37: highlighted = True
                 
             elif RawANSIChunk.cmdByte == 'J': #Erase in Display 
                 if RawANSIChunk.b1 > 2: telnetLogger.error("Encountered an Erase in Display command with a byte1 value greater than 2 in RawANSI.parse(). This violates the ANSI standard; check parsing")
@@ -378,9 +374,13 @@ class Connection():
             elif RawANSIChunk.cmdByte == '?25':
                 pass
 
+            elif RawANSIChunk.cmdByte == 'i': #AUX Port
+                self.AUXData.append(RawANSIChunk.txt)
+                continue
+
             else: telnetLogger.debug(f"Error: RawANSI.parseToText() has no specific code to handle ANSI code '{RawANSIChunk.cmdByte}' ({RawANSIChunk.cmd}).")
 
-            if RawANSIChunk.txt: #position/color changes will have already been performed at this point, and apply to any subsequent RawANSIChunks due to being stored in local variables.
+            if RawANSIChunk.txt: #position/color changes will have already been performed at this point, and apply to any subsequent RawANSIChunks, due to being stored in local variables.
                 #Making this test dependent on text len ensures nothing gets missed
                 _tRawANSIChunk = ParsedANSICommand(line=currentLine, column=currentColumn, text=RawANSIChunk.txt, highlighted=highlighted, deleteMode=0, deleteTarget=0)
                 #print(f"appending RawANSIChunk <{_tRawANSIChunk}>"
