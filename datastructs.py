@@ -153,6 +153,10 @@ class TestSet():
         if TimeOverdue:
             if (TimeOverdue[-1]=="m"): 
                 self.Overdue    = datetime.timedelta(minutes=int(TimeOverdue[:-1]))
+            
+            if (TimeOverdue[-5:]==" mins"): 
+                self.Overdue    = datetime.timedelta(minutes=int(TimeOverdue[:-5]))
+
             else: 
                 self.Overdue    = datetime.timedelta(hours=int(TimeOverdue))
         else:

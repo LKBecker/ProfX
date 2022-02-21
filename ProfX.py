@@ -335,10 +335,13 @@ class tp_Patient(datastructs.Patient):
 
 
 class tp_TestSet(datastructs.TestSet):
-    def __init__(self, Sample:str, SetIndex:str, SetCode:str, AuthedOn:str=None, AuthedBy:str=None, Status:str=None, 
+    def __init__(self,  Sample:str, SetIndex:str, SetCode:str, AuthedOn:str=None, AuthedBy:str=None, Status:str=None, 
                  Results:list=None, Comments:list=None, RequestedOn:str=None, TimeOverdue:str=None, Override:bool=False):
-        super().__init__(Sample, SetIndex, SetCode, AuthedOn, Status, Results, Comments, RequestedOn, TimeOverdue, Override)
+        super().__init__(Sample, SetIndex, SetCode, AuthedOn, AuthedBy, Status, Results, Comments, RequestedOn, TimeOverdue, Override)
         self.History = []
+
+    @property
+    def is_overdue(self): return self.Overdue.total_seconds() > 0
 
     def __repr__(self): 
         return f"tp_TestSet(ID={str(self.Sample)}, SetIndex={self.Index}, SetCode={self.Code}, AuthedOn={self.AuthedOn}, AuthedBy={self.AuthedBy}, Status={self.Status}, ...)"
@@ -457,7 +460,7 @@ def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
     TelePath.send(config.LOCALISATION.AUTHORISATION)
     TelePath.read_data()
     AuthQueues = TelePath.Lines[4].split("\r\n")[1:]
-    AuthQueues = utils.process_whitespaced_table(AuthQueues[1:], WYTH_AUTH_HEADER_SIZES)
+    AuthQueues = utils.process_whitespaced_table(AuthQueues, WYTH_AUTH_HEADER_SIZES)
     #AuthQueues = [item for sublist in AuthQueues for item in sublist]
     AuthQueues = processTwoColumnLines(AuthQueues)
     for AuthQueue in AuthQueues:
@@ -568,17 +571,20 @@ def BasicInterface():
 
         1   List number of outstanding sendaways
         2   Generate outstanding sendaways table      
-        
         """)
         choice2 = get_user_input(is_numeric, "Please select a number from 1 to 2.", "Please select from the above options: ", 1, 2)
         if choice2 == "1":
             sendaways_scan()
+            print("""   Would you like to retrieve a list of these samples? """)
+            choice3 = get_user_input(is_alphanumeric, "Please answer Y/N", "Please answer either Y or N.", None, None)
+            if choice3 == "Y":
+                choice2 = "2"
+
         if choice2 =="2":
             sendaways_scan(getDetailledData=True)
 
     if choice=="2": #AOTs
-        print("""
-    
+        print("""    
     Outstanding AOTs menu
     
     Please select from the following options:
@@ -628,16 +634,14 @@ def BasicInterface():
     if choice=="5":
         print("""
     Recent samples
-    
         """)
         SetToDL = get_user_input(is_alphanumeric, "Please use only A-Za-z and 0-9.", "For which set do you want to retrieve recent samples? ")
         NSets   = get_user_input(is_numeric, "Please enter a number between 1 and 100.", "How many samples do you want to retrieve at most? ", 1, 100)
-        print(get_recent_samples_of_set_type(SetToDL, nMaxSamples=NSets))
+        print(get_recent_samples_of_set_type(SetToDL, nMaxSamples=int(NSets)))
         
     if choice=="6":
         print("""
     Patient history
-    
         """)
         SampleToDL = get_user_input(is_sample, "Please enter a valid sample ID.", "Which sample do you wish to generate a patient history from? ")
         get_recent_history(SampleToDL, nMaxSamples=15)
@@ -708,10 +712,10 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             if SetToGet.Status[0]=="R":
                 SetIsAuthed = True
 
-        if not SetIsAuthed:
-            AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.column==0 and x.highlighted == True]
+        if SetIsAuthed:
+            AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.highlighted == True][0]
             if AuthData:
-                if not AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
+                if AuthData.text.strip() == "WARNING :- these results are unauthorised":
                     SetIsAuthed = False
         
         if SetIsAuthed:
@@ -842,7 +846,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     TelePath.read_data()
     SampleCounter = 0
     nSamples = len(SampleObjs)
-    ReportInterval = max(min(250, int(nSamples*0.1)), 1)
+    ReportInterval = max(min(50, round(nSamples*0.1)), 1)
     logging.debug(f"complete_specimen_data_in_obj(): Beginning retrieval...")
     for Sample in SampleObjs: 
         if Sample.ID[:1] == "19":
@@ -853,7 +857,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             logging.warning("complete_specimen_data_in_obj(): Sample ID '%s' does not appear to be valid. Skipping to next..." % Sample.ID)
             continue
         TelePath.send(Sample.ID, quiet=True)
-        TelePath.read_data(max_wait=400)   # And read screen.
+        TelePath.read_data(max_wait=300)   # And read screen.
         if (TelePath.hasErrors == True):
             # Usually the error is "No such specimen"; the error shouldn't be 'incorrect format' if we ran validate_ID().
             logging.warning(f"complete_specimen_data_in_obj(): '{';'.join(TelePath.Errors)}'")
@@ -897,6 +901,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                         get_history(SetToGet)
 
                     TelePath.send(str(SetToGet.Index), quiet=True)
+                    time.sleep(0.1)
                     TelePath.read_data()
 
                     if (TelePath.ScreenType == "SENQ_DisplayResults"):
@@ -910,7 +915,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
                         SetToGet.Results = []
                         if ("Results" in TelePath.Options):
                             TelePath.send('R', quiet=True)
-                            TelePath.read_data(max_wait=400)
+                            TelePath.read_data()
                             extract_results(SetToGet, Sample.Collected)
                             if ("Set com" in TelePath.Options and GetComments==True):
                                 extract_set_comments(SetToGet)
@@ -929,8 +934,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         SampleCounter += 1
         Pct = (SampleCounter / nSamples) * 100
         if(SampleCounter % ReportInterval == 0): 
-            logging.info(f"complete_specimen_data_in_obj(): {SampleCounter} of {nSamples} samples ({Pct:.2f}%) complete")
-    time.sleep(0.1)
+            logging.info(f"complete_specimen_data_in_obj(): {SampleCounter:03} of {nSamples} samples ({Pct:.2f}%) complete")
     #for Sample in Samples
     logging.debug("complete_specimen_data_in_obj(): All downloads complete.")
 
@@ -1059,6 +1063,7 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
     TelePath.read_data()
     
     TelePath.send("-", quiet=True)
+    time.sleep(0.2)
     TelePath.read_data()
     Samples=[]
     dataChunk = TelePath.AUXData[0].strip("\r\x0c").split("\r\n")
@@ -1169,6 +1174,7 @@ def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, La
     TelePath.send("") # Skip location
     TelePath.send("") # Skip GP
     TelePath.send("") # Skip consultant
+    time.sleep(0.2)
     TelePath.read_data() # TODO: why is everything in ONE LINE
     logging.info(f"get_recent_samples_of_set_type(): Loading samples...")
     fixLines = TelePath.Lines[1].split("\r\n")
@@ -1433,76 +1439,70 @@ def sendaways_scan(getDetailledData:bool=False) -> None:
             SAWAYS_OUT.write(HeaderStr)
             del HeaderStr
             for SAWAY_Sample in OverdueSAWAYs:
-                try:
-                    OverdueSets = [x for x in SAWAY_Sample.Sets if x.is_overdue]
-                    for OverdueSet in OverdueSets:
-                        #Specimen NHSNumber   Lastname    First Name  DOB Received    Test
-                        outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.NHSNumber}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}\t"
-                        if isinstance(SAWAY_Sample.DOB, datetime.datetime):
-                            outStr = outStr+SAWAY_Sample.DOB.strftime('%d/%m/%Y')
-                        else:
-                            outStr = outStr+str(SAWAY_Sample.DOB)
-                        outStr = outStr+f"\t{SAWAY_Sample.Received.strftime('%d/%m/%Y')}\t{OverdueSet.Code}\t"
+                for OverdueSet in SAWAY_Sample.Sets:
+                    #Specimen NHSNumber   Lastname    First Name  DOB Received    Test
+                    outStr = f"{SAWAY_Sample.ID}\t{SAWAY_Sample.NHSNumber}\t{SAWAY_Sample.LName}\t{SAWAY_Sample.FName}\t"
+                    if isinstance(SAWAY_Sample.DOB, datetime.datetime):
+                        outStr = outStr+SAWAY_Sample.DOB.strftime('%d/%m/%Y')
+                    else:
+                        outStr = outStr+str(SAWAY_Sample.DOB)
+                    outStr = outStr+f"\t{SAWAY_Sample.Received.strftime('%d/%m/%Y')}\t{OverdueSet.Code}\t"
 
-                        #Retrieve Referral lab info
-                        ReferralLab_Match = [x for x in SAWAY_DB if x.SetCode == OverdueSet.Code]
-                        if(len(ReferralLab_Match)==1):
-                            ReferralLab_Match = ReferralLab_Match[0]
-                        #Test Name  Referral Lab Contact
-                        LabStr = "[Not Found]\t[Not Found]\t[Not Found]\t"
-                        if ReferralLab_Match:
-                            LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Contact}\t"
-                            if ReferralLab_Match.Email:
-                                LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Email}\t"
-                        outStr = outStr + LabStr
-                        
-                        #Hours Overdue
-                        outStr = outStr + f"{OverdueSet.Overdue.total_seconds()/3600}\t"
-                                             
-                        # CurrentAction   Action Log
-                        outStr = outStr + "\t\t"
-                            
-                        #Sample Status
-                        StatusStr = "Incomplete\t"
-                        outStr = outStr + StatusStr
-
-                        #Check for comments
-                        CommStr = "\t"
-                        if OverdueSet.Comments: 
-                            CommStr = f"{' '.join(OverdueSet.Comments)}\t"
-                        outStr = outStr + CommStr
-
-                        #Clinical Details
-                        if SAWAY_Sample.ClinDetails:
-                            outStr = outStr + SAWAY_Sample.ClinDetails + "\t"
-                        else:
-                            outStr = outStr + "No Clinical Details\t"
-
-                        
-                        #Check for Notepad
-                        NPadStr = ""
-                        if SAWAY_Sample.hasNotepadEntries == True:
-                            NPadStr = "|".join([str(x) for x in SAWAY_Sample.NotepadEntries])
-                        outStr = outStr + NPadStr
+                    #Retrieve Referral lab info
+                    ReferralLab_Match = [x for x in SAWAY_DB if x.SetCode == OverdueSet.Code]
+                    if(len(ReferralLab_Match)==1):
+                        ReferralLab_Match = ReferralLab_Match[0]
+                    #Test Name  Referral Lab Contact
+                    LabStr = "[Not Found]\t[Not Found]\t[Not Found]\t"
+                    if ReferralLab_Match:
+                        LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Contact}\t"
+                        if ReferralLab_Match.Email:
+                            LabStr = f"{ReferralLab_Match.AssayName}\t{ReferralLab_Match.Name}\t{ReferralLab_Match.Email}\t"
+                    outStr = outStr + LabStr
                     
-                        outStr = outStr + "\n"
-                        SAWAYS_OUT.write(outStr)
-        
-                except AssertionError:
-                    continue
+                    #Hours Overdue
+                    outStr = outStr + f"{OverdueSet.Overdue.total_seconds()/3600}\t"
+                                            
+                    # CurrentAction   Action Log
+                    outStr = outStr + "\t\t"
+                        
+                    #Sample Status
+                    StatusStr = "Incomplete\t"
+                    outStr = outStr + StatusStr
+
+                    #Check for comments
+                    CommStr = "\t"
+                    if OverdueSet.Comments: 
+                        CommStr = f"{' '.join(OverdueSet.Comments)}\t"
+                    outStr = outStr + CommStr
+
+                    #Clinical Details
+                    if SAWAY_Sample.ClinDetails:
+                        outStr = outStr + SAWAY_Sample.ClinDetails + "\t"
+                    else:
+                        outStr = outStr + "No Clinical Details\t"
+
                     
+                    #Check for Notepad
+                    NPadStr = ""
+                    if SAWAY_Sample.hasNotepadEntries == True:
+                        NPadStr = "|".join([str(x) for x in SAWAY_Sample.NotepadEntries])
+                    outStr = outStr + NPadStr
+                
+                    outStr = outStr + "\n"
+                    SAWAYS_OUT.write(outStr)
         logging.info(f"sendaways_scan(): Complete. Downloaded and exported data for {len(SAWAY_Counters)} overdue sendaway samples to file.")
 
 if __name__ == "__main__":
     logging.info(f"TelePath TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
     connect()
-
+    
     try:
         #==========
         #Interfaces
         #==========
         #CLI()  
-        #BasicInterface()    
+        BasicInterface()    
 
         #==========
         #Data retrieval functions
@@ -1522,17 +1522,17 @@ if __name__ == "__main__":
         #==========
         #aot_stub_buster() # Shows how many open AOTs there are for section AUTO
         #aot_stub_buster(insert_NA_result=True, get_creators=False) # Shows how many open AOTs there are for section AUTO, closed them, tells you who made them
-        sendaways_scan() # Shows how many overdue sendaways there are
+        #sendaways_scan() # Shows how many overdue sendaways there are
         #sendaways_scan(getDetailledData=True) # Shows how many overdue sendaways there are, and creates a spreadsheet to follow them up. Needs a sendaways_database.tsv    
         #NPEX_Buster(Set="FIT") # Retrieves outstanding (but not overdue) Sets for the entire lab, and checks NPEX whether there are results for any. 
         #NPEX_Buster(Set="FCAL")
-        auth_queue_size(DetailLevel=1)
+        #auth_queue_size(DetailLevel=1)
         #lab_status_report()
         #visualise("A,22.0093756.G", nMaxSamples=10) #Still a bit experimental - retrieves recent data for the patient of this sample and makes graphs.
         pass
 
-    except Exception as e: 
-        logging.error(e)
+    # except Exception as e: 
+    #     logging.error(e)
 
     finally:
         disconnect()
