@@ -963,9 +963,9 @@ def connect(TrainingSystem=False):
         if config.LOCALISATION.LIMS_USER != "YOUR USERNAME HERE": 
             user = config.LOCALISATION.LIMS_USER
         else: 
-            user = input("Enter your TelePath username: ")
+            user = input("Enter your TelePath username (and press Enter): ")
     else:
-        user = input("Enter your TelePath username: ")
+        user = input("Enter your TelePath username (and press Enter; it won't be shown!): ")
     user = user.upper()
 
     if config.LOCALISATION.LIMS_PW:
