@@ -222,24 +222,35 @@ class tp_Specimen(datastructs.Specimen):
         self.Comment            = TelePath.chunk_or_none(DataChunks, line = 6, column = 16)
         self.ReportComment      = TelePath.chunk_or_none(DataChunks, line = 4, column = 16)
         
-        TestStart = ANSIChunks.index([x for x in ANSIChunks if x.text == "Sets Requested :-"][0])
-        for i in range(TestStart+3, len(ANSIChunks), 4):
-            if (ANSIChunks[i]).text == '' or (ANSIChunks[i+3]).text != '': break
-            index   = int(ANSIChunks[i].text.strip().replace(")", ""))
-            test    = ANSIChunks[i+1].text.strip()
-            status  = ANSIChunks[i+2].text.strip().lstrip(".")
-            if self.Sets:
-                _tmp = [x for x in range(0, len(self.Sets)) if self.Sets[x].Code == test]
-                if _tmp:
-                    self.Sets[_tmp[0]].Index  = index
-                    self.Sets[_tmp[0]].Status = status
-                    continue
-            self.Sets.append(tp_TestSet(Sample=self.ID, SetIndex=index, SetCode=test, Status=status))
-        
         #TelePath only highlights the specimen notepad option if entries exist; else it's part of a single chunk of options, none highlighted. So...
         if [x for x in ANSIChunks if (x.text=="spc N'pad" and x.highlighted)]: 
             self.hasNotepadEntries = True
-    
+
+        PossWaitMsg = [x for x in ANSIChunks if x.line==23 and x.column == 1]
+        if PossWaitMsg:
+            PossWaitMsg = PossWaitMsg[0]
+            if PossWaitMsg.text == "Authorising in foreground - please wait":
+                return
+
+        TestStart = [x for x in ANSIChunks if x.text == "Sets Requested :-"]
+        if TestStart:
+            TestStart = ANSIChunks.index(TestStart[0])
+            for i in range(TestStart+3, len(ANSIChunks), 4):
+                if (ANSIChunks[i]).text == '' or (ANSIChunks[i+3]).text != '': break
+                index   = int(ANSIChunks[i].text.strip().replace(")", ""))
+                test    = ANSIChunks[i+1].text.strip()
+                status  = ANSIChunks[i+2].text.strip().lstrip(".")
+                if self.Sets:
+                    _tmp = [x for x in range(0, len(self.Sets)) if self.Sets[x].Code == test]
+                    if _tmp:
+                        self.Sets[_tmp[0]].Index  = index
+                        self.Sets[_tmp[0]].Status = status
+                        continue
+                self.Sets.append(tp_TestSet(Sample=self.ID, SetIndex=index, SetCode=test, Status=status))
+        else:
+            logging.debug(f"Cannot find 'Sets requested' for sample {self.ID}. Check ANSIChunks, please.")
+            logging.debug(ANSIChunks)
+           
     def validate_ID(self) -> bool: return self._ID.validate()
 
 
@@ -457,6 +468,7 @@ def auth_queue_size(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
     ts = datetime.datetime.now()
     NPCLQueues = []
 
+    logging.info("auth_queue_size(): Retrieving data...")
     TelePath.send(config.LOCALISATION.AUTHORISATION)
     TelePath.read_data()
     AuthQueues = TelePath.Lines[4].split("\r\n")[1:]
