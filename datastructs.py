@@ -480,7 +480,7 @@ def load_sendaways_table(filePath = "./Sendaways_Database.tsv"):
 def load_reference_ranges(filePath="./Limits.txt"):
     RefRanges = []
     if not os.path.isfile(filePath):
-        logging.error("Missing reference_ranges.tsv file in installation directory. Will not be able to use Reference Ranges for graphs.")
+        logging.error(f"Missing {filePath} file in installation directory. Will not be able to use Reference Ranges for graphs.")
         return []
     with open(filePath, 'r') as RefRangeFile:
         for line in RefRangeFile:
@@ -526,6 +526,6 @@ def samples_to_file(Samples:list, FilterSets = None):
                 NPadStr = "|".join([str(x) for x in sample.NotepadEntries])
                 DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t\t\t\t\t{NPadStr}\n")
 
-REF_RANGES = load_reference_ranges()
+#REF_RANGES = load_reference_ranges()
 
 Patient.Storage = SingleTypeStorageContainer(Patient)
