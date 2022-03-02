@@ -553,6 +553,13 @@ def BasicInterface():
             return True
         return False
 
+    def is_yesOrNo(UserInput:str, lowerBound:None, upperBound:None):
+        if (len(UserInput)!=1): return False
+        UserInput = UserInput.upper()
+        if UserInput == "Y" or UserInput == "N":
+            return True
+        return False
+
     def is_sample(UserInput:str, lowerBound:None, upperBound:None):
         _sample = tp_SpecimenID(UserInput)
         return _sample.validate()
@@ -572,7 +579,7 @@ def BasicInterface():
         7   Set ripper for Beaker
         8   Exit
     """)
-    choice = get_user_input(is_numeric, "Please select a number from 1 to 8:", "Please select from the above options: ", 1, 8)
+    choice = get_user_input(is_numeric, "Please select a number from 1 to 8: ", "Please select from the above options: ", 1, 8)
 
     if choice=="1": # Sendaways
         print("""
@@ -588,7 +595,7 @@ def BasicInterface():
         if choice2 == "1":
             sendaways_scan()
             print("""   Would you like to retrieve a list of these samples? """)
-            choice3 = get_user_input(is_alphanumeric, "Please answer Y/N", "Please answer either Y or N.", None, None)
+            choice3 = get_user_input(is_yesOrNo, "Please answer either Y or N", "Y/N: ", None, None)
             if choice3 == "Y":
                 choice2 = "2"
 
