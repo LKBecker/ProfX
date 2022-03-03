@@ -86,7 +86,7 @@ class RawANSICommand():
     nF_EscSequence =  re.compile(r'\x1b\((?P<Prm_Bytes>[\x20-\x2F]*)(?P<Imd_Bytes>[\x20-\x2F]*)(?P<FinalByte>[\x30-\x7E])') 
     #See https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_(Control_Sequence_Introducer)_sequences
     #See https://vt100.net/emu/ctrlseq_dec.html
-    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>["\w\.!?\- ]+)')
+    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>[\"\x07\w\.\!\?\- ]+)')
 
     ORD_FINAL_PRIVSEQ_MIN = ord("p")
     ORD_FINAL_PRIVSEQ_MAX = ord("~")

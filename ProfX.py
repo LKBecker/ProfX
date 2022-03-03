@@ -596,7 +596,7 @@ def BasicInterface():
             sendaways_scan()
             print("""   Would you like to retrieve a list of these samples? """)
             choice3 = get_user_input(is_yesOrNo, "Please answer either Y or N", "Y/N: ", None, None)
-            if choice3 == "Y":
+            if choice3.upper() == "Y":
                 choice2 = "2"
 
         if choice2 =="2":
@@ -665,7 +665,7 @@ def BasicInterface():
         SampleToDL = get_user_input(is_sample, "Please enter a valid sample ID.", "Which sample do you wish to generate a patient history from? ")
         get_recent_history(SampleToDL, nMaxSamples=15)
 
-    input("Press any key to exit...")
+    input("Program complete. Press enter key to exit...")
 
 """ command-line interface, also not yet tested """
 def CLI():
@@ -726,15 +726,15 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         SetAuthTime = "[Not Authorized]"
         SetRepTime = "[Not Reported]"
 
-        SetIsAuthed = True #TODO Set to True for some testing, should technically start False (but works due to defensive code below)
+        SetIsAuthed = False #TODO Set to True for some testing, should technically start False (but works due to defensive code below)
         if SetToGet.Status: #TODO: All Statuses are None - where are they retrieved?
             if SetToGet.Status[0]=="R":
                 SetIsAuthed = True
 
         if SetIsAuthed:
-            AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.highlighted == True][0]
+            AuthData = [x for x in TelePath.ParsedANSI if x.line == 21 and x.highlighted == True]
             if AuthData:
-                if AuthData.text.strip() == "WARNING :- these results are unauthorised":
+                if AuthData[0].text.strip() == "WARNING :- these results are unauthorised":
                     SetIsAuthed = False
         
         if SetIsAuthed:
@@ -861,7 +861,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
         return
 
     return_to_main_menu()
-    TelePath.send(config.LOCALISATION.SPECIMENENQUIRY, quiet=True) #Move to specimen inquiry 
+    TelePath.send(config.LOCALISATION.SPECIMENENQUIRY) #Move to specimen inquiry 
     TelePath.read_data()
     SampleCounter = 0
     nSamples = len(SampleObjs)
@@ -876,7 +876,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
             logging.warning("complete_specimen_data_in_obj(): Sample ID '%s' does not appear to be valid. Skipping to next..." % Sample.ID)
             continue
         TelePath.send(Sample.ID, quiet=True)
-        TelePath.read_data(max_wait=300)   # And read screen.
+        TelePath.read_data(max_wait=500)   # And read screen.
         if (TelePath.hasErrors == True):
             # Usually the error is "No such specimen"; the error shouldn't be 'incorrect format' if we ran validate_ID().
             logging.warning(f"complete_specimen_data_in_obj(): '{';'.join(TelePath.Errors)}'")
@@ -1195,6 +1195,11 @@ def get_recent_samples_of_set_type(Set:str, FirstDate:datetime.datetime=None, La
     TelePath.send("") # Skip consultant
     time.sleep(0.2)
     TelePath.read_data() # TODO: why is everything in ONE LINE
+    if TelePath.hasErrors:
+        error = parse_TP_error()
+        logging.info(f"TelePath returned the following error: {error['msg']}")
+        return []
+
     logging.info(f"get_recent_samples_of_set_type(): Loading samples...")
     fixLines = TelePath.Lines[1].split("\r\n")
     fixLines = [x for x in fixLines if x]
@@ -1521,12 +1526,15 @@ if __name__ == "__main__":
         #Interfaces
         #==========
         #CLI()  
-        BasicInterface()    
+        #BasicInterface()    
 
         #==========
         #Data retrieval functions
         #==========
-        #mass_download(get_recent_samples_of_set_type("OEMS", nMaxSamples=200), FilterSets=["OEMS"], getNotepad=False) #FilterSets means only the specified sets are retrieved
+        #CA125S = get_recent_samples_of_set_type("CA125A", nMaxSamples=200)
+        #mass_download(CA125S, FilterSets=["CA125A"], getNotepad=False) #FilterSets means only the specified sets are retrieved
+        CA199S = get_recent_samples_of_set_type("CA199A", nMaxSamples=200)
+        mass_download(CA199S, FilterSets=["CA199A"], getNotepad=False) #FilterSets means only the specified sets are retrieved
         #mass_download() # Downloads all data for samples in ToRetrieve.txt and saves to file.
         #get_recent_sister_result(ReninALDOSamples, "E2", "K")
         #get_recent_history("22.0119928.T", nMaxSamples=24) #Gets up to nMaxSamples recent samples for the same patient as the given sample. Good to get a quick patient history.
