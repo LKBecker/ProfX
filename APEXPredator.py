@@ -10,7 +10,36 @@
 VERSION = "0.1.0"
 LOGFORMAT = '%(asctime)s: %(name)-10s:%(levelname)-7s:%(message)s'
 
-import argparse
+class ANSI():
+    BACKSPACE   = "\x08"
+    TAB         = "\x09"
+    ESCAPE      = "\x1B"
+    CSI         = ESCAPE + '[' #ANSI Control Sequence Introducer - ESC [
+    ARROW_UP    = CSI + "A"
+    ARROW_DOWN  = CSI + "B"
+    ARROW_RIGHT = CSI + "C"
+    ARROW_LEFT  = CSI + "D"
+    PAGE_UP     = CSI + "5~"
+    PAGE_DOWN   = CSI + "6~"
+    HOME        = CSI + "7~"
+    END         = CSI + "8~"
+    F1          = CSI + "11~"
+    F2          = CSI + "12~"
+    F3          = CSI + "13~"
+    F4          = CSI + "14~"
+    F5          = CSI + "15~"
+    F6          = CSI + "17~"
+    F7          = CSI + "18~"
+    F8          = CSI + "19~"
+    F9          = CSI + "20~"
+    F10         = CSI + "21~"
+    F11         = CSI + "23~"
+    F12         = CSI + "24~"
+    
+
+    def __init__(self) -> None:
+        pass
+
 import apex_config
 from collections import Counter
 import datetime
@@ -78,18 +107,14 @@ def BasicInterface():
 
 """ """
 def return_to_main_menu(ForceReturn:bool=False, MaxTries:int=10):
-    #APEX.send(b"\x1B\x5B\x31\x37\x7E") # CSI 17~ eq F6
-    APEX.send(b"\x1B\x5B17~")
-    APEX.send(b'Y')
-    #TryCounter = 0
-    #logging.debug("Returning to main menu...")
-    #TargetScreen = "MainMenu"
-    #while(APEX.ScreenType != TargetScreen and TryCounter <= MaxTries):
-    #    APEX.send(apex_config.LOCALISATION.CANCEL_ACTION)
-    #    APEX.read_data()
-    #    TryCounter = TryCounter+1
-    #if TryCounter > MaxTries:
-    #    raise Exception(f"Could not reach main menu in {MaxTries} attempts.")
+    TryCounter = 0
+    logging.debug("Returning to main menu...")
+    while(APEX.ScreenType != "MainMenu" and TryCounter <= MaxTries):
+        APEX.send(apex_config.LOCALISATION.CANCEL_ACTION)
+        APEX.read_data()
+        TryCounter = TryCounter+1
+    if TryCounter > MaxTries:
+        raise Exception(f"Could not reach main menu in {MaxTries} attempts.")
 
 """ """
 def retrieve_Specimen_data(Samples:list, retrieveBy:str="SpecimenID"):
@@ -155,7 +180,9 @@ logging.info(f"APEXPredator client, version {VERSION}. (c) Lorenz K. Becker, und
 
 try:
     connect()
-    #BasicInterface()
+    assert APEX.ScreenType == "MainMenu"
+
+    APEX.send("ENQ")
 
 
 except Exception as e: 

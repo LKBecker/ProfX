@@ -3,7 +3,7 @@
 *.db
 *.txt
 *.log
-/Sendaways_Database.tsv
+/Sendaways_Database.txt
 *.pyc
 *.xlsx
 config.py

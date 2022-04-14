@@ -444,7 +444,7 @@ SetsIO.close()
 SetsToRip = [x.strip() for x in SetsToRip][1:5]
 
 try:
-    connect()
+    connect_to_LIMS()
     set_ripper(SetsToRip, reckless=True)
 
 except Exception as e: 

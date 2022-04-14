@@ -461,7 +461,7 @@ class ReferralLab():
 
 
 """ Loads data from Sendaways_Database.tsv, and parses into ReferralLab() instances. Assumes consistent, tab-separated data."""
-def load_sendaways_table(filePath = "./Sendaways_Database.tsv"):
+def load_sendaways_table(filePath = "./Sendaways_Database.txt"):
     if not(os.path.exists(filePath)): raise FileNotFoundError("File '%s' does not appear to exist" % filePath)
     SAWAYS = []
     SAWAY_IO = open(filePath).readlines()
