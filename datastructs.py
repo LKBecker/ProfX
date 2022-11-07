@@ -153,6 +153,10 @@ class TestSet():
         if TimeOverdue:
             if (TimeOverdue[-1]=="m"): 
                 self.Overdue    = datetime.timedelta(minutes=int(TimeOverdue[:-1]))
+            
+            if (TimeOverdue[-5:]==" mins"): 
+                self.Overdue    = datetime.timedelta(minutes=int(TimeOverdue[:-5]))
+
             else: 
                 self.Overdue    = datetime.timedelta(hours=int(TimeOverdue))
         else:
@@ -335,7 +339,7 @@ class Specimen():
 class Patient():
     def __init__(self, ID):
         self.ID = ID
-        self.Samples = []
+        self.Samples = set()
         self.FName = None
         self.LName = None
         self.DOB = None
@@ -379,7 +383,7 @@ class Patient():
 
         for otherSample in other.Samples:
             if otherSample in self.Samples: continue
-            self.Samples.append(otherSample)
+            self.Samples.add(otherSample)
                             
     def create_plot(self, FilterAnalytes:list=None, firstDate:datetime.datetime=None, lastDate:datetime.datetime=None, nMinPoints:int=1):
         raise NotImplementedError("create_plot(): Not implemented yet.")
@@ -436,13 +440,6 @@ class Patient():
     def list_loaded_results(self):
         return list(chain.from_iterable([x.Results for x in self.Samples]))
       
-    def add_sample(self, new_sample):
-        IDs = [str(x.ID) for x in self.Samples]
-        if not new_sample.ID in IDs:
-            self.Samples.append(new_sample)
-        #TODO: Cross-compare sample to sample? Complete information?
-
-
 """Contains data about a Sendaway Assay - receiving location, contact, expected TAT"""
 class ReferralLab():
     def __init__(self, labname, assayname, setcode, maxtat, contact, email=None):
@@ -457,7 +454,7 @@ class ReferralLab():
 
 
 """ Loads data from Sendaways_Database.tsv, and parses into ReferralLab() instances. Assumes consistent, tab-separated data."""
-def load_sendaways_table(filePath = "./Sendaways_Database.tsv"):
+def load_sendaways_table(filePath = "./Sendaways_Database.txt"):
     if not(os.path.exists(filePath)): raise FileNotFoundError("File '%s' does not appear to exist" % filePath)
     SAWAYS = []
     SAWAY_IO = open(filePath).readlines()
@@ -476,7 +473,7 @@ def load_sendaways_table(filePath = "./Sendaways_Database.tsv"):
 def load_reference_ranges(filePath="./Limits.txt"):
     RefRanges = []
     if not os.path.isfile(filePath):
-        logging.error("Missing reference_ranges.tsv file in installation directory. Will not be able to use Reference Ranges for graphs.")
+        logging.error(f"Missing {filePath} file in installation directory. Will not be able to use Reference Ranges for graphs.")
         return []
     with open(filePath, 'r') as RefRangeFile:
         for line in RefRangeFile:
@@ -486,23 +483,36 @@ def load_reference_ranges(filePath="./Limits.txt"):
             RefRanges.append( ReferenceRange(Analyte=tmp[0], Upper=tmp[3], Lower=tmp[2], Unit=tmp[1]) )
     return RefRanges
 
-def samples_to_file(Samples:list, FilterSets = None):
+def sample_to_outputString(sample, FilterSets=None):
+    pass
+
+def samples_to_file(Samples:list, FilterSets = None, fileName:str=None):
     logging.info("samples_to_file(): Writing data to file.")
     outFile = f"./{utils.timestamp(fileFormat=True)}_TPDownload.txt"
+    if fileName:
+        outFile = f"./{utils.timestamp(fileFormat=True)}_{fileName}.txt"
     with open(outFile, 'w') as DATA_OUT:
-        DATA_OUT.write("SampleID\tCollectionDate\tCollectionTime\tReceivedDate\tReceivedTime\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
+        DATA_OUT.write("Patient\tDOB\tSampleID\tCollected\tReceived\tSet\tStatus\tAnalyte\tValue\tUnits\tFlags\tComments\n")
         for sample in Samples:
-            OutStr = sample.ID + "\t"
+            _PatientID = sample.PatientID
+            if _PatientID:
+                if len(_PatientID) > 8:
+                    _PatientID = format(_PatientID, "0>9")
+                else:
+                    _PatientID = format(_PatientID, "0>8")
+            else:
+                _PatientID = "[Unknown]"
+            OutStr = f"{_PatientID}\t{sample.DOB}\t{sample.ID}\t"
             if sample.Sets:
                 if sample.Collected:
-                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y") + "\t" + sample.Collected.strftime("%H:%M") + "\t"
+                    OutStr = OutStr + sample.Collected.strftime("%d/%m/%Y %H:%M\t")
                 else:
-                    OutStr = OutStr + "NA\tNA\t"
+                    OutStr = OutStr + "NA\t"
 
                 if sample.Received:
-                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y") + "\t" + sample.Received.strftime("%H:%M")
+                    OutStr = OutStr + sample.Received.strftime("%d/%m/%Y %H:%M")
                 else:
-                    OutStr = OutStr + "NA\tNA"
+                    OutStr = OutStr + "NA"
 
                 for _set in sample.Sets:
                     if FilterSets:
@@ -517,11 +527,11 @@ def samples_to_file(Samples:list, FilterSets = None):
                             else:
                                 DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t{_result}\t\t{ComStr}\n") #_result calls str(), needs an extra \t if there are no flags
                     else:
-                        DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t\t\t\t\t\t\t\n") #_result calls str(), which returns Analyte\tValue\tUnit\tFlags
+                        DATA_OUT.write(f"{OutStr}\t{_set.Code}\t{_set.Status}\t\t\t\t\t\n") #_result calls str(), which returns Analyte\tValue\tUnit\tFlags
             if sample.hasNotepadEntries == True:
                 NPadStr = "|".join([str(x) for x in sample.NotepadEntries])
                 DATA_OUT.write(f"{OutStr}\tSpecimen Notepad\t\t\t\t\t\t{NPadStr}\n")
 
-REF_RANGES = load_reference_ranges()
+#REF_RANGES = load_reference_ranges()
 
 Patient.Storage = SingleTypeStorageContainer(Patient)

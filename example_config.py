@@ -43,6 +43,7 @@ LOCALISATION = TelePath_Commands(
     OVERDUE_SAMPLES="W_OVR",                    # Check overdue sets
     OVERDUE_AUTOMATION="AUTOM",                 # Overdue sets, section AUTOMATION
     OVERDUE_SENDAWAYS="AWAY",                   # Overdue sets, section SENDAWAYS
+    CANCEL_REQUESTS="CANCEL",
     TRAININGSYSTEM="TRAIN",                     # Switch to training system
     SETHISTORY="H",                             # Retrieve history of a set
     QUIT="Q",                                   # Quit/Stop

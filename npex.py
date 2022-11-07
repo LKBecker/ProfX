@@ -8,8 +8,8 @@ import requests
 import logging
 
 npexLogger = logging.getLogger(__name__)
-NPEX_ROOT_LINK = "https://lab2lab.xlab.this.nhs.uk/"
-NPEX_LOGIN_LINK = NPEX_ROOT_LINK + "https://lab2lab.xlab.this.nhs.uk/login/authenticate/"
+NPEX_ROOT_LINK = "https://lab2lab.nhs.labgnostic.com/"
+NPEX_LOGIN_LINK = NPEX_ROOT_LINK + "login/authenticate/"
 NPEX_DATA_LINK = NPEX_ROOT_LINK + "Orders/Show/WITH-"
 NPEX_SEARCH_LINK = NPEX_ROOT_LINK + ""
 

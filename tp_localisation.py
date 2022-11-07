@@ -26,6 +26,7 @@ class TelePath_Commands:
     OVERDUE_SAMPLES: str
     OVERDUE_AUTOMATION: str
     OVERDUE_SENDAWAYS: str
+    CANCEL_REQUESTS: str
     TRAININGSYSTEM: str
     SETHISTORY: str
     CANCEL_ACTION: str

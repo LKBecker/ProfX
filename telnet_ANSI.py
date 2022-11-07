@@ -86,7 +86,7 @@ class RawANSICommand():
     nF_EscSequence =  re.compile(r'\x1b\((?P<Prm_Bytes>[\x20-\x2F]*)(?P<Imd_Bytes>[\x20-\x2F]*)(?P<FinalByte>[\x30-\x7E])') 
     #See https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_(Control_Sequence_Introducer)_sequences
     #See https://vt100.net/emu/ctrlseq_dec.html
-    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>["\w\.!?\- ]+)')
+    PTERMCmd = re.compile(r'\x1bP\$(?P<cmd>\w+) (?P<params>[\"\x07\w\.,\!\?\-:; ]+)') #TODO: consider just matching the $ and splitting afterwards...
 
     ORD_FINAL_PRIVSEQ_MIN = ord("p")
     ORD_FINAL_PRIVSEQ_MAX = ord("~")
@@ -238,16 +238,16 @@ class Connection():
         #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY. 
 
     def read_data(self, max_wait = 200, ms_input_wait = 100, wait = True): #HACK: 100 / 50?
-        self.textBuffer = self.tn.read_very_eager() #very_eager never blocks, only returns data stripped of all TELNET control codes, negotiation, etc                              
-        if self.textBuffer == b'' or wait:            # we didn't get anything (yet?) but we expected something
-            time.sleep(ms_input_wait/1000)          # give APEX 500ms to get its shit together
-            tmp = self.tn.read_very_eager()   # try reading again
+        self.textBuffer = self.tn.read_very_eager()
+        if self.textBuffer == b'' or wait:
+            time.sleep(ms_input_wait/1000)          
+            tmp = self.tn.read_very_eager()   
             waited = ms_input_wait
-            while tmp != b'' and waited < max_wait: # read until we get nothing
-                self.textBuffer += tmp        # append what we got
-                time.sleep(ms_input_wait/1000)      # give APEX 500ms to get its shit together
-                waited = waited + ms_input_wait     # count wait time
-                tmp = self.tn.read_very_eager()   # try reading again
+            while tmp != b'' and waited < max_wait: 
+                self.textBuffer += tmp        
+                time.sleep(ms_input_wait/1000)
+                waited = waited + ms_input_wait
+                tmp = self.tn.read_very_eager()
         if self.textBuffer:
             self.Screen_from_text(self.textBuffer)
             telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.ParsedANSI))
@@ -369,7 +369,7 @@ class Connection():
                 _ParsedANSI.append(_delRawANSIChunk)
             
             elif RawANSIChunk.cmdByte == 'tmessage': 
-                telnetLogger.debug("Received PowerTerm tmessage, args '%s'" % RawANSIChunk.txt)
+                telnetLogger.debug(f"Received PowerTerm tmessage, args '{RawANSIChunk.txt}'")
                 _tRawANSIChunk = ParsedANSICommand(0, 0, RawANSIChunk.txt, False, 0, 0, True) #RawANSIChunk.txt contains the parameters of the tmessage function call
                 _ParsedANSI.append(_tRawANSIChunk)
                 continue

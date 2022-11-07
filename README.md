@@ -23,7 +23,7 @@ Inside your config.py:
 <!-- USAGE EXAMPLES -->
 ## Usage
 Use main.py to run commands. 
-A CLI is planned for future release.
+A CLI may be accessed via the CLI() function (enabled by default)
 
 <!-- ROADMAP -->
 ## Roadmap
