@@ -57,6 +57,30 @@ class tp_HistoryEntry():
         return f"Sample {str(self.SampleID)}, Set {self.TestSet}, {self.DateTime}: {self.Event} {self.User}"
 
 
+class tp_Error():
+    def __init__(self, errStr) -> None:
+        
+        pass
+
+
+class tp_HistoryEntry():
+    def __init__(self, Sample, TestSet, DateTime="", Event="", User=""):
+        self.SampleID = Sample
+        self.TestSet = TestSet
+        self.DateTime = DateTime
+        self.Event = Event
+        self.User = User
+
+    def fromChunks(self):
+        pass
+
+    def __repr__(self): 
+        return f"tp_HistoryEntry(Sample={str(self.SampleID)}, TestSet={self.TestSet}, DateTime={self.DateTime}, Event={self.Event}, User={self.User})"
+    
+    def __str__(self): 
+        return f"Sample {str(self.SampleID)}, Set {self.TestSet}, {self.DateTime}: {self.Event} {self.User}"
+
+
 #TODO: port over gr lr eq
 class tp_SpecimenID(datastructs.SampleID):
     CHECK_INT = 23
@@ -391,6 +415,9 @@ class tp_TestSet(datastructs.TestSet):
     @property
     def is_overdue(self): return self.Overdue.total_seconds() > 0
 
+    @property
+    def is_overdue(self): return self.Overdue.total_seconds() > 0
+
     def __repr__(self): 
         return f"tp_TestSet(ID={str(self.Sample)}, SetIndex={self.Index}, SetCode={self.Code}, AuthedOn={self.AuthedOn}, AuthedBy={self.AuthedBy}, Status={self.Status}, ...)"
     
@@ -466,7 +493,7 @@ def fill_overdue_AOT_stubs(insert_NA_result:bool=False, get_creators:bool=False)
                 AOTData.write(f"{key}\t{value}\n")
     logging.debug("aot_stub_buster(): Complete.")
 
-def get_NPCL_queue_sizes(QueueFilter:list=None, DetailLevel:int=0, writeToFile=False):
+def get_NPCL_queue_sizes(QueueFilter:list=None, DetailLevel:int=0, writeToFile=True):
     WYTH_AUTH_HEADER_SIZES = [ 4,13,40,45,53]
     WYTH_NPCL_HEADER_SIZES = [12,21,52,61]
 
@@ -676,7 +703,7 @@ def BasicInterface():
         """)
         SetToDL = get_user_input(is_alphanumeric, "Please use only A-Za-z and 0-9.", "For which set do you want to retrieve recent samples? ")
         NSets   = get_user_input(is_numeric, "Please enter a number between 1 and 100.", "How many samples do you want to retrieve at most? ", 1, 100)
-        print(get_recent_samples_of_set_type(SetToDL, nMaxSamples=int(NSets)))
+        print(get_recent_samples_of_set_type(SetToDL, nMaxSamples=int(int(NSets))))
         
     if choice=="6":
         print("""
@@ -930,6 +957,7 @@ def complete_specimen_data_in_obj(SampleObjs=None, GetNotepad:bool=False, GetCom
     SampleCounter = 0
     nSamples = len(SampleObjs)
     ReportInterval = max(min(50, round(nSamples*0.1)), 1)
+    logging.info(f"complete_specimen_data_in_obj(): Beginning retrieval...")
     for Sample in SampleObjs: 
         if Sample.ID[:1] == "19":
             logging.info("complete_specimen_data_in_obj(): Avoiding specimen(s) from 2019, which can induce a crash on access.")    
@@ -1028,9 +1056,9 @@ def connect_to_LIMS(TrainingSystem=False):
         if config.LOCALISATION.LIMS_USER != "YOUR USERNAME HERE": 
             user = config.LOCALISATION.LIMS_USER
         else: 
-            user = input("Enter your TelePath username (and press Enter): ")
+            user = input("Enter your TelePath username (and press Enter) (and press Enter): ")
     else:
-        user = input("Enter your TelePath username (and press Enter; it won't be shown!): ")
+        user = input("Enter your TelePath username (and press Enter; it won't be shown!) (and press Enter; it won't be shown!): ")
     user = user.upper()
 
     if config.LOCALISATION.LIMS_PW:
@@ -1176,6 +1204,75 @@ def add_extended_autocomments(Mode:str="VITD") -> None:
                 TelePath.read_data()
     return      
 
+def add_comment(Mode:str="VITD") -> None:
+    def VitD_Sum_Comment(ResultData):
+        headerLenghts   = utils.extract_column_widths(ResultData[0])
+        table           = utils.process_whitespaced_table(ResultData[1:], headerLenghts)
+        results         = {}
+        eitherOver = False
+        for entry in table:
+            Analyte = entry[1]
+            Result = float(entry[2].rstrip("."))
+            results[Analyte]=Result
+            if Result > 50.0:
+                eitherOver = True
+        del(table)
+        TotalVitD = sum(results.values)
+        logging.info(f"Processed: {results}. Total Vitamin D: {TotalVitD}.")
+        if not eitherOver:
+            TelePath.send("C") #Comment
+            TelePath.send("A") #Add
+            TelePath.send("/") #Free-text
+            TelePath.send(f"Total 25-OH Vitamin D = {TotalVitD:.1f} nmol/L") #Free-text
+            TelePath.read_data()
+            if TelePath.hasErrors:
+                err = parse_TP_error()
+                #TODO: react to err.text
+            TelePath.send("") #Exit Comments Mode: Add
+            TelePath.send("") #Exit Comments
+
+    NPCLQueues = get_NPCL_queue_sizes(DetailLevel=1)
+    if Mode=="VITD":
+        NPCLQueues = [x for x in NPCLQueues if x[0]=="VTD"]
+    if NPCLQueues:
+        logging.info(f"extended_autocomment(): Running in mode [{Mode}]. Discovered {sum(x[3] for x in NPCLQueues)} sets to process.")
+        return_to_main_menu()
+        TelePath.send(config.LOCALISATION.AUTHORISATION)
+        TelePath.send(NPCLQueues[0][0]) #Send queue CODE, as index is volatile
+        TelePath.read_data()
+        for subQueue in NPCLQueues:
+            TelePath.send(subQueue[2]) #Send queue number
+            TelePath.read_data() #Read in results screen
+            #TODO: Might need to confirm New List
+            TelePath.send("A") #Authorise from Screen
+            TelePath.read_data() #Read in results screen
+            TelePath.send("A") #All; we should now be viewing the first set in the queue
+            TelePath.read_data() #Read in results screen
+            while TelePath.ScreenType == "NPCL_Auth":
+                if TelePath.hasErrors:
+                    err = parse_TP_error()
+                    logging.info(f"TelePath sent the following message: {err.text}")
+                    if err.text == "NB. GHOST entry":
+                        TelePath.send("NX") #Go to NEXT entry
+                        TelePath.read_data()
+                        continue
+
+                if Mode=="VITD":
+                    alreadyCommented = False
+                    currentComments = TelePath.Lines[12:-1] #Single line with /r/n ? Or multiline?
+                    expectedStr = "Total 25-OH Vitamin D"
+                    for comment in currentComments:
+                        #Check whether comments already contains 'Total 25-OH Vitamin D'
+                        if comment.strip()[:len(expectedStr)] == expectedStr:
+                            alreadyCommented = True
+                    
+                    if not alreadyCommented:
+                        resultData = TelePath.Lines[8:11] #comedy option: retrieval from SENQ through threading of 2nd client
+                        VitD_Sum_Comment(resultData)
+                TelePath.send("NX") #NeXt sample, NOT authorising
+                TelePath.read_data()
+    return      
+
 def get_outstanding_samples_for_Set(Set:str, Section:str="ALL"):
     logging.info(f"get_outstanding_samples_for_Set(): Retrieving items for Set [{Set}]")
     OutstandingSamples = []
@@ -1213,6 +1310,7 @@ def get_overdue_sets(Section:str=config.LOCALISATION.OVERDUE_AUTOMATION, SetCode
     TelePath.read_data()
     
     TelePath.send("-", quiet=True)
+    time.sleep(0.5)
     time.sleep(0.5)
     TelePath.read_data()
     Samples=[]
@@ -1421,16 +1519,16 @@ def get_recent_worksheets(Assay:str, nSheets:int=3, startDate:datetime.date=None
         Sheet = [item for sublist in Sheet for item in sublist]
         Sheet = [x.strip("\x12") for x in Sheet if x]
         System = Sheet[0].strip("\r")
-        Sheet = Sheet[1:-1]                         #Having retrieved the system name, we remove the first instance
-        assert Sheet [-1] == "End of list"          #This should leave End of list as the final line, which we assert
+        Sheet = Sheet[1:-1]                         #Having retrieved the system name, we remove the first instance                         #Having retrieved the system name, we remove the first instance
+        assert Sheet [-1] == "End of list"          #This should leave End of list as the final line, which we assert          #This should leave End of list as the final line, which we assert
         Run = Sheet[0]
         Sheet = Sheet[1:-1]
-        Sheet = [x for x in Sheet if x != Run]      #Remove recurring page header
+        Sheet = [x for x in Sheet if x != Run]      #Remove recurring page header      #Remove recurring page header
         Sheet = [x for x in Sheet if x != System]
-        ColHeaders = [Sheet[0]]                     #Retrieve column headers
+        ColHeaders = [Sheet[0]]                     #Retrieve column headers                     #Retrieve column headers
         Sheet = Sheet[1:]
         if Sheet[0].split(" ")[0] == "Cup":
-            doubleLineMode = True                   #Each entry is spread across two lines
+            doubleLineMode = True                   #Each entry is spread across two lines                   #Each entry is spread across two lines
             ColHeaders.append(Sheet[0])
             Sheet = Sheet[1:]
         for line in ColHeaders:
@@ -1766,8 +1864,8 @@ def locate_Patient_Records():
 
 if __name__ == "__main__":
     logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
-    connect_to_LIMS()
-    
+    connect_to_LIMS_to_LIMS()
+        
     try:
         #CLI()
         #get_recent_history(nMaxSamples=50, FilterSets=["EP"])
@@ -1785,8 +1883,8 @@ if __name__ == "__main__":
         #fill_overdue_AOT_stubs(insert_NA_result=False)
         pass
 
-    # except Exception as e: 
-    #     logging.error(e)
+    # # except Exception as e: 
+    # #     logging.error(e)
 
     finally:
         disconnect()
