@@ -13,11 +13,10 @@ class APEX_Commands:
     ANSWERBACK: str
     NPEX_USER:str
     NPEX_PW:str
-    CANCEL_ACTION: str
-    NA: str
-    RELEASE: str
-    EMPTYSTR: str
-    QUIT: str
-    ENQUIRIES: str
+    CANCEL_ACTION:str
+    ENQUIRY:str
+    AUDIT:str
+    AUTHQUEUES:str
+    SPECSTATUS:str
     identify_screen: Callable
     check_sample_id: Callable

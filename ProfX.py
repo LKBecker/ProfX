@@ -1226,7 +1226,7 @@ def add_comment(Mode:str="VITD") -> None:
             TelePath.send(f"Total 25-OH Vitamin D = {TotalVitD:.1f} nmol/L") #Free-text
             TelePath.read_data()
             if TelePath.hasErrors:
-                err = parse_TP_error()
+                err = parse_TP_errors()
                 #TODO: react to err.text
             TelePath.send("") #Exit Comments Mode: Add
             TelePath.send("") #Exit Comments
@@ -1250,7 +1250,7 @@ def add_comment(Mode:str="VITD") -> None:
             TelePath.read_data() #Read in results screen
             while TelePath.ScreenType == "NPCL_Auth":
                 if TelePath.hasErrors:
-                    err = parse_TP_error()
+                    err = parse_TP_errors()
                     logging.info(f"TelePath sent the following message: {err.text}")
                     if err.text == "NB. GHOST entry":
                         TelePath.send("NX") #Go to NEXT entry
@@ -1864,7 +1864,7 @@ def locate_Patient_Records():
 
 if __name__ == "__main__":
     logging.info(f"ProfX TelePath client, version {VERSION}. (c) Lorenz K. Becker, under GNU General Public License")
-    connect_to_LIMS_to_LIMS()
+    connect_to_LIMS()
         
     try:
         #CLI()
