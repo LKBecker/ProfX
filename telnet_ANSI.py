@@ -112,7 +112,12 @@ class RawANSICommand():
         'i':'AUX Port',
         'n':'DSR',
         'tmessage': "PowerTerm Popup",
-        'X' : "Self-appended chunk - telnet read wrong?"
+        '?25' : "Text Cursor Enable/Disable",
+        'X' : "Self-appended chunk - telnet read wrong?",
+        '(': "Set Default Font", #Unconfirmed   https://www.cse.psu.edu/~kxc104/class/cse472/09s/hw/hw7/vt100ansi.htm
+        ')': "Set Alternate Font",
+        ']': "Blank or Fragment",
+        'BEL': "Bell"
         }
 
     def __init__(self, byte1, byte2, byte3, cmd, text, is_private=False):
@@ -128,10 +133,14 @@ class RawANSICommand():
         self.cmdByte = cmd
         self.txt = text
 
+        if self.b1 == "?25":
+            self.b1 = self.cmdByte
+            self.cmdByte = "?25"   
+            
         try:
             self.cmd = RawANSICommand.Commands[self.cmdByte]
         except KeyError:
-            self.cmd = f"[{hex(ord(self.cmdByte))}]"
+                self.cmd = f"[{hex(ord(self.cmdByte))}]"
 
     """Digests raw text into the ANSI command and the included text."""
     @staticmethod
@@ -156,8 +165,13 @@ class RawANSICommand():
         if text == '\x1b\\':
             return RawANSICommand(0, 0, 0, "0", "BLANK")
 
-        else:
-            raise Exception(f"from_text(): cannot create an ANSI command from [{text}].")
+        if text == '\x1b[':
+            return RawANSICommand(0, 0, 0, "[", "")
+
+        if text =='\x07':
+            return RawANSICommand(0, 0, 0, "BEL", "")
+
+        raise Exception(f"from_text(): cannot create an ANSI command from [{text}].")
             
     def __str__(self):  return (f"<{self.cmd}: {self.b1} {self.b2} {self.b3} => '{self.txt}'>")
 
@@ -172,7 +186,7 @@ class Connection():
     TERMINALS           = [b"", b"VT100", b"VT102", b"NETWORK-VIRTUAL-TERMINAL", b"UNKNWN"] #A list of the different terminal types we're willing to lie and pretend we are
     History = []
     HISTORY_LENGTH = 5
-    EscapeSplitter = re.compile(r"(?=\x1b)", flags=re.M)
+    EscapeSplitter = re.compile(r"(?=\x1b)|(?=\x07)", flags=re.M)
 
     def __init__(self, Answerback=b'VT100\x0D'):
         self.tn = telnetlib.Telnet()
@@ -237,7 +251,7 @@ class Connection():
         elif command in (telnetlib.WILL, telnetlib.WONT): tsocket.send(telnetlib.IAC + telnetlib.DONT + option) 
         #We also don't care to discuss anything else. Good DAY to you, Sir. I said GOOD DAY. 
 
-    def read_data(self, max_wait = 200, ms_input_wait = 100, wait = True): #HACK: 100 / 50?
+    def read_data(self, max_wait = 2000, ms_input_wait = 200, wait = True): #HACK: 100 / 50?
         self.textBuffer = self.tn.read_very_eager()
         if self.textBuffer == b'' or wait:
             time.sleep(ms_input_wait/1000)          
@@ -250,13 +264,15 @@ class Connection():
                 tmp = self.tn.read_very_eager()
         if self.textBuffer:
             self.Screen_from_text(self.textBuffer)
-            telnetLogger.debug("Connection.read_data(): Constructed screen from %d ANSIChunks" % len(self.ParsedANSI))
+            telnetLogger.debug(f"Connection.read_data(): Constructed screen from {len(self.ParsedANSI)} ANSIChunks, current type {self.ScreenType}")
 
-    def send_raw(self, message, quiet=False, readEcho=True):
+        if(waited >= max_wait): logging.debug("WARNING: Maximum wait time reached or exceeded - there may be additional ASCII / cut-off commands")
+
+    def send_raw(self, message, quiet=False, readEcho=True, maxwait_ms=1000):
         try:
-            if not quiet: telnetLogger.debug(f"Sending {message} to Connection")
+            if not quiet: telnetLogger.debug(f"send_raw(): Sending [{message}] to Connection, last char {message[-1]}, aka {chr(message[-1])}.")
             self.tn.write(message)
-            if (readEcho): self.tn.read_until(message)
+            if (readEcho): self.tn.read_until(message, timeout=(maxwait_ms/1000))
         except OSError as OSE:
             telnetLogger.error(f"Error whilst attempting to send message to Connection: {OSE.strerror}")
         except:
@@ -264,9 +280,12 @@ class Connection():
     
     def send(self, message, quiet=False, readEcho=True, maxwait_ms=1000):
         try:
+            if isinstance(message, bytes):
+                self.send_raw(message, quiet=quiet, readEcho=readEcho)
+                return
             message = str(message)
             ASCIImsg = message.encode("ASCII")+b'\x0D'
-            if not quiet: telnetLogger.debug(f"Sending '{message}' to Connection")
+            if not quiet: telnetLogger.debug(f"send(): Sending [{ASCIImsg}] to Connection.")
             self.tn.write(ASCIImsg)
             if (readEcho): 
                 if message:
@@ -280,6 +299,25 @@ class Connection():
     def send_and_ignore(self, msg, quiet=False, readEcho=True):
         self.send(msg, quiet, readEcho)   # 
         self.tn.read_very_eager()         # Take and ignore all data being returned in response to this message
+
+    def connect_single_user(self, IP, Port:int=23, Answerback:bytes=b"VT100\x0D", User:str=None, PW:str=None):
+        self.Answerback = Answerback 
+
+        self.tn.set_option_negotiation_callback(self.set_options)  #Register our set_options function as the resource to interpret any negotiation calls we get
+        self.tn.set_debuglevel(Connection.DEBUGLEVEL)
+        telnetLogger.debug("Opening connection to remote host...")
+        self.tn.open(IP, Port, timeout=1)
+        self.tn.read_until(b"login: ")
+        # self.send(IBMUser)
+        # telnetLogger.debug("Connected to remote. Waiting for login...")
+        # self.tn.read_until(b'\x05')
+        # self.tn.write(self.Answerback)
+        # #TODO: be ready for invalid Terminal ID; make up/use a different one.
+
+        self.send(User)
+        self.tn.set_debuglevel(0) #Let's not echo anyone's password(s)
+        self.send(PW, quiet=True, readEcho=False)
+        self.tn.set_debuglevel(Connection.DEBUGLEVEL)
 
     def connect(self, IP, Port:int=23, IBMUser:str="AIX", Answerback:bytes=b"VT100\x0D", Userprompt:str=None, User:str=None, PWPrompt:str=None, PW:str=None):
         self.Answerback = Answerback 
@@ -319,12 +357,17 @@ class Connection():
 
     def parse_raw_ANSI(self, workingText):
         self.AUXData = []
+        self.Bell = False
         self.rawANSICmds = []
         _ParsedANSI       = []
         if workingText == b'\x05':
             self.tn.write(self.Answerback)
             return
         workingText         = workingText.decode("ASCII").lstrip()
+        TextHasBell = workingText.find('\x07')
+        if TextHasBell != -1:
+            self.Bell = True
+
         firstANSICodePos    = workingText.find('\x1b[')
         if (firstANSICodePos  == -1): raise Exception("Raw text does not contain *any* ANSI control codes - is this really telnet output?")
         if (firstANSICodePos > 0):
@@ -346,9 +389,11 @@ class Connection():
         highlighted   = False
         
         for RawANSIChunk in self.rawANSICmds:
-            #print ("processing %s (%s)" % (RawANSIChunk, RawANSIChunk.cmdByte))
+            logging.debug(f"processing {RawANSIChunk} ({RawANSIChunk.cmdByte}). Line: {currentLine}, Column: {currentColumn}.")
             if RawANSIChunk.cmdByte == 'H':                #Set Cursor Position
-                currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting
+                currentLine     = RawANSIChunk.b1 - 1      # Python starts at 0, ANSI lines start at 1, let's make this ~pythonic~ by subtracting 
+                if (RawANSIChunk.b1 == 0): #TelePath starts at line 1 - LabCentre appears to start at 0. Compensating... 221118
+                    currentLine = 0
                 currentColumn   = RawANSIChunk.b2      # Same as above but for columns, though some SCP columns do start at 0!
                                 
             elif RawANSIChunk.cmdByte == 'm':              #Select Graphic Rendition
@@ -375,6 +420,16 @@ class Connection():
                 continue
 
             elif RawANSIChunk.cmdByte == '?25':
+                pass
+
+            elif RawANSIChunk.cmdByte == '[': #Empty ANSI code
+                pass
+
+            elif RawANSIChunk.cmdByte == ')': #Set alternate font
+                #TODO
+                pass
+
+            elif RawANSIChunk.cmdByte == 'BEL':
                 pass
 
             elif RawANSIChunk.cmdByte == 'i': #AUX Port

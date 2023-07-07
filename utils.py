@@ -3,21 +3,29 @@
 #import logging
 import datetime
 import math
+import re
 
 """Extracts the column widths from a variable-whitespace separated table, from a line of headers.
 Headers are assumed *not* to have single spaces in their column names!"""
-def extract_column_widths(headerStr:str, mustStartWithCapital:bool=True, headersColumnsAlignLeft:bool=True) -> list: 
+def extract_column_widths(headerStr:str, mustStartWithCapital:bool=True, headersColumnsAlignLeft:bool=True, excludeSingleSpaces:bool=True) -> list: 
+    #TODO: r'(?<= ) (?=\w)' ? 
     if headersColumnsAlignLeft:
         if not mustStartWithCapital:
             return [x+1 for x in range(0, len(headerStr)) if headerStr[x] == ' ' and headerStr[x+1] != ' ']
         return [x+1 for x in range(0, len(headerStr)) if headerStr[x] == ' ' and headerStr[x+1] != ' ' and (ord(headerStr[x+1]) > 64 and ord(headerStr[x+1]) < 91) ]
+    
     else:
-        return [x+1 for x in range(0, len(headerStr)-1) if headerStr[x] != ' ' and headerStr[x+1] == ' ']
+        if not mustStartWithCapital:
+            return [x+1 for x in range(0, len(headerStr)-1) if headerStr[x] != ' ' and headerStr[x+1] == ' ']
+        return [x+1 for x in range(0, len(headerStr)-1) if headerStr[x] != ' ' and headerStr[x+1] == ' ' and (ord(headerStr[x+1]) > 64 and ord(headerStr[x+1]) < 91) ]
+
+def extract_column_widths_re(headerStr:str):
+    return [x.span()[1] for x in re.finditer(r'(?<= ) (?=\w)', headerStr)]
 
 """ Uses headerWidths derived from extract_column_widths() to parse a list of strings into a list of lists of strings (a table)"""
-def process_whitespaced_table(tableLines: list, headerWidths: list) -> list:
-    if len(headerWidths) < 2: 
-        raise Exception("headerWidths should contain at least two numbers.")
+def process_whitespaced_table(tableLines: list, headerWidths: list, enforceLineLength:bool=True) -> list:
+    if len(headerWidths) < 1: 
+        raise Exception("headerWidths should contain at least one number.")
     parsedStrings = []
     for line in tableLines:
         if not line: continue
@@ -29,6 +37,9 @@ def process_whitespaced_table(tableLines: list, headerWidths: list) -> list:
         _tmpStr = line[headerWidths[-1]:].strip()
         if _tmpStr:
             parsedString.append( _tmpStr )
+        if enforceLineLength:
+            while len(parsedString) < len(headerWidths)+1:
+                parsedString.append('')
         parsedStrings.append(parsedString)
     return parsedStrings
 

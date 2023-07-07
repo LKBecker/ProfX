@@ -32,31 +32,6 @@ logging.getLogger().addHandler(console)
 telnet_ANSI.Connection.recognise_Screen_type = config.LOCALISATION.identify_screen #Overrides default function with that from localisation
 TelePath = telnet_ANSI.Connection(Answerback=config.LOCALISATION.ANSWERBACK)
 
-
-class tp_Error():
-    def __init__(self, errStr) -> None:
-        
-        pass
-
-
-class tp_HistoryEntry():
-    def __init__(self, Sample, TestSet, DateTime="", Event="", User=""):
-        self.SampleID = Sample
-        self.TestSet = TestSet
-        self.DateTime = DateTime
-        self.Event = Event
-        self.User = User
-
-    def fromChunks(self):
-        pass
-
-    def __repr__(self): 
-        return f"tp_HistoryEntry(Sample={str(self.SampleID)}, TestSet={self.TestSet}, DateTime={self.DateTime}, Event={self.Event}, User={self.User})"
-    
-    def __str__(self): 
-        return f"Sample {str(self.SampleID)}, Set {self.TestSet}, {self.DateTime}: {self.Event} {self.User}"
-
-
 class tp_Error():
     def __init__(self, errStr) -> None:
         
